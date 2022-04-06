@@ -8,7 +8,14 @@ Data   SEGMENT PUBLIC
 board  DB 32 DUP (0) ; 32 bytes, one nibble per board tile
 player DB 0
 pieces DB " PRNBQK? prnbqk?"
-coords DB " a8"
+coords DB "    "     ; 4 bytes for two sets of chess board coordinates
+prompts DW prompt1,prompt2,prompt1,prompt2,prompt3
+move   DB 0          ; Current step for player move selection
+                     ; 0 - not started
+                     ; 1 - got first letter
+                     ; 2 - got first number (source tile selected)
+                     ; 3 - got second letter
+                     ; 4 - got second number (destination tile selected) - may not be used
 Data   ENDS
 
 ; 000 empty space
@@ -54,17 +61,47 @@ start:    mov AX, Data
           sub BX, 28         ; (BX = board + 2) First row, second half
           mov [BX], AX       ; Place remaining black pieces
           ; Player should already be set to white by assembler
-game:     call drawBoard ; Draw the chess board
-          call checkmate ; Check if player is checkmated
+game:     call checkmate ; Check if player is checkmated
           jnz gameOver   ; If they are, show message, and then exit
           call check     ; Check if player is in check
           jz prompt      ; If not, skip the following instructions
           ;if they are, tell them
-prompt:   ; prompt player for move
+prompt:   call drawBoard ; Draw the chess board
+          ; prompt player for move
           xor AH, AH     ; Keyboard function 0, get keystroke
           int 16h        ; Keyboard
           cmp AL, 71h    ; 71h = 'q'
           je gameOver    ; Quit
+          ; Read a move
+          mov BL, move   ; Get current move step (how far player is in making their move)
+          xor BH, BH     ; Clear BX
+          shl BX, 1      ; Multiply by 2 since addresses are words not bytes
+          jmp prompts[BX] ; Jump based on current step
+          ; Read in a letter
+prompt1:  sub AL, 61h    ; 61h = 'a'
+          jl prompt      ; Try again
+          sub AL, 8      ; AL -= 8
+          jge prompt     ; Try again
+          add AL, 69h    ; Restore column character
+          shr BX, 1      ; Unshift from earlier jump
+          mov coords[BX], AL ; Store in coordinate variable
+          inc BL         ; Next step
+          mov move, BL   ; Update in memory
+          jmp prompt
+          ; Read in a number
+prompt2:  sub AL, 31h    ; 31h = '1'
+          jl prompt      ; Try again
+          sub AL, 8      ; AL -= 8
+          jge prompt     ; Try again
+          add AL, 39h    ; Restore row character
+          shr BX, 1      ; Unshift from earlier jump
+          inc BL         ; Next step
+          mov move, BL   ; Update in memory
+          dec BL         ; DL is either 2 or 4, so now it will be 1 or 3
+          mov coords[BX], AL ; Store in coordinate variable
+          jmp prompt
+          ; Confirm move
+prompt3:  mov move, 0    ; Set move step thingy to 0
           call valid     ; Check if move is valid (and if player is in check, make sure move gets them out of check)
           jz prompt
           ; make move
@@ -212,7 +249,47 @@ drawRow:  lea BX, board       ; Get address of board data
           pop CX              ; Restore count
           jmp drawLoop        ; Back to top
 
-drawEnd:  ret
+drawEnd:  ; Board is done, now show staged move
+          xor BX, BX          ; Page 0
+          mov AX, 0E0Dh       ; BIOS video 0E, write char - 0x0D = '\r'
+          int 10h             ; BIOS video
+          mov AX, 0E0Ah       ; 0x0A = '\n'
+          int 10h
+          ;mov AX, 0E46h       ; 0x46 = 'F'
+          ;int 10h
+          ;mov AX, 0E20h       ; 0x20 = ' '
+          ;int 10h
+          mov AH, 0Eh
+          mov AL, coords[0]    ; Source Column
+          int 10h
+          mov AH, 0Eh
+          mov AL, coords[1]  ; Source Row
+          int 10h
+          ;mov AX, 0E0Dh       ; 0x0D = '\r'
+          ;int 10h
+          ;mov AX, 0E0Ah       ; 0x0A = '\n'
+          ;int 10h
+          mov AX, 0E20h       ; 0x20 = ' '
+          int 10h
+          mov AX, 0E74h       ; 0x74 = 't'
+          int 10h
+          mov AX, 0E6Fh       ; 0x6F = 'o'
+          int 10h
+          ;mov AX, 0E54h       ; 0x54 = 'T'
+          ;int 10h
+          mov AX, 0E20h       ; 0x20 = ' '
+          int 10h
+          mov AH, 0Eh
+          mov AL, coords[2]  ; Destination Column
+          int 10h
+          mov AH, 0Eh
+          mov AL, coords[3]  ; Destination Row
+          int 10h
+          ;mov AX, 0E0Dh       ; 0x0D = '\r'
+          ;int 10h
+          ;mov AX, 0E0Ah       ; 0x0A = '\n'
+          ;int 10h
+          ret
 drawBoard ENDP
 
 checkmate PROC
@@ -233,10 +310,12 @@ check PROC
         ; for each of the 8 directions, go through empty board spaces
         ; until you find a piece (either player)
         ; check if that piece can attack the king
+        xor AX, AX ; TEMP: hardcoded that the player was not found to be in check
         ; if so, clear the zero flag in some way and
         jz knight ; Lastly, check if any knights can attack
         ret
 knight: ; check if there are knights in any of the 8 attacking positions
+        xor AX, AX ; TEMP: hardcoded that the player was not found to be in check
         ret
 check ENDP
 
@@ -244,6 +323,10 @@ check ENDP
 ; Check if a move is valid
 ;
 valid PROC
+      ; Invalid move
+      mov WORD PTR coords[0], 2020h ; Clear source coordinate
+      mov WORD PTR coords[2], 2020h ; Clear destination coordinate
+      xor DX, DX ; Set to 0 (to set Zero Flag)
       ret
 valid ENDP
 

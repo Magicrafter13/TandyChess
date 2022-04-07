@@ -4,32 +4,36 @@ Stack    SEGMENT STACK
 theStack DB 8 DUP ("(C) Matthew R.  ") ; 8 * 16 bytes
 Stack    ENDS
 
-Data    SEGMENT PUBLIC
-board   DB 32 DUP (0)  ; 32 bytes, one nibble per board tile
-                       ; 000 empty space
-                       ; 001 pawn
-                       ; 010 rook
-                       ; 011 knight
-                       ; 100 bishop
-                       ; 101 queen
-                       ; 110 king
-                       ; fourth bit for player
-player  DB 0           ; Current player
-pieces  DB " PRNBQK?", ; White pieces
-           " prnbqk?"  ; Black pieces
-coords  DB "    "      ; 4 bytes for two sets of chess board coordinates
-prompts DW prompt1,    ; Next parse source column
-           prompt2,    ; Next parse source row
-           prompt1,    ; Next parse destination column
-           prompt2,    ; Next parse destination row
-           prompt3     ; Next try move and reset
-move    DB 0           ; Current step for player move selection
-                       ; 0 - not started
-                       ; 1 - got first letter
-                       ; 2 - got first number (source tile selected)
-                       ; 3 - got second letter
-                       ; 4 - got second number (destination tile selected) - may not be used
-Data    ENDS
+Data     SEGMENT PUBLIC
+board    DB 32 DUP (0)  ; 32 bytes, one nibble per board tile
+                        ; 000 empty space
+                        ; 001 pawn
+                        ; 010 rook
+                        ; 011 knight
+                        ; 100 bishop
+                        ; 101 queen
+                        ; 110 king
+                        ; fourth bit for player
+player   DB 0           ; Current player
+pieces   DB " PRNBQK?", ; White pieces
+            " prnbqk?"  ; Black pieces
+message0 DB "Enter move > ",0
+message1 DB "Illegal move! ",0
+msgTable DW message0, message1
+status   DW 0
+coords   DB "    "      ; 4 bytes for two sets of chess board coordinates
+prompts  DW prompt1,    ; Next parse source column
+            prompt2,    ; Next parse source row
+            prompt1,    ; Next parse destination column
+            prompt2,    ; Next parse destination row
+            prompt3     ; Next try move and reset
+move     DB 0           ; Current step for player move selection
+                        ; 0 - not started
+                        ; 1 - got first letter
+                        ; 2 - got first number (source tile selected)
+                        ; 3 - got second letter
+                        ; 4 - got second number (destination tile selected) - may not be used
+Data     ENDS
 
 Code SEGMENT PUBLIC
 
@@ -42,29 +46,29 @@ start:    mov AX, Data
           ;
           ; Initialize Board
           ;
-          mov AX, 9999h      ; Four black pawns
-          lea BX, board      ; Get address of board
-          add BX, 4          ; (BX = board + 4) Second row
-          mov [BX], AX       ; Place pawns
-          add BX, 2          ; BX = board + 6
-          mov [BX], AX       ; Place remaining pawns
-          and AX, 7777h      ; Change to four white pawns
-          add BX, 18         ; BX = board + 24
-          mov [BX], AX       ; Place pawns
-          add BX, 2          ; BX = board + 26
-          mov [BX], AX       ; Place remaining pawns
-          mov AX, 0DCBAh     ; Black rook, knight, bishop, and queen
-          sub BX, 26         ; BX = board
-          mov [BX], AX       ; Place black pieces
-          and AX, 7777h      ; Change to white pieces
-          add BX, 28         ; (BX = board + 28) Eighth row
-          mov [BX], AX       ; Place white pieces
-          mov AX, 2346h      ; White king, bishop, knight, and rook
-          add BX, 2          ; BX = board + 30
-          mov [BX], AX       ; Place remaining white pieces
-          or  AX, 8888h      ; Change to black pieces
-          sub BX, 28         ; (BX = board + 2) First row, second half
-          mov [BX], AX       ; Place remaining black pieces
+          mov AX, 9999h  ; Four black pawns
+          lea BX, board  ; Get address of board
+          add BX, 4      ; (BX = board + 4) Second row
+          mov [BX], AX   ; Place pawns
+          add BX, 2      ; BX = board + 6
+          mov [BX], AX   ; Place remaining pawns
+          and AX, 7777h  ; Change to four white pawns
+          add BX, 18     ; BX = board + 24
+          mov [BX], AX   ; Place pawns
+          add BX, 2      ; BX = board + 26
+          mov [BX], AX   ; Place remaining pawns
+          mov AX, 0DCBAh ; Black rook, knight, bishop, and queen
+          sub BX, 26     ; BX = board
+          mov [BX], AX   ; Place black pieces
+          and AX, 7777h  ; Change to white pieces
+          add BX, 28     ; (BX = board + 28) Eighth row
+          mov [BX], AX   ; Place white pieces
+          mov AX, 2346h  ; White king, bishop, knight, and rook
+          add BX, 2      ; BX = board + 30
+          mov [BX], AX   ; Place remaining white pieces
+          or  AX, 8888h  ; Change to black pieces
+          sub BX, 28     ; (BX = board + 2) First row, second half
+          mov [BX], AX   ; Place remaining black pieces
           ; Player should already be set to white by assembler
 
           ;
@@ -79,7 +83,7 @@ game:     call checkmate ; Check if player is checkmated
           ;
           ; User input
           ;
-prompt:   call drawBoard ; Draw the chess board
+prompt:   call drawBoard     ; Draw the chess board
           ; prompt player for move
           xor AH, AH         ; Keyboard function 0, get keystroke
           int 16h            ; Keyboard
@@ -118,7 +122,7 @@ prompt3:  mov move, 0        ; Set move step thingy to 0
           call valid         ; Check if move is valid (and if player is in check, make sure move gets them out of check)
           jz prompt
           ; make move
-          xor [player], 1    ; change to other player's turn
+          xor player, 1      ; change to other player's turn
           jmp game
 
           ;
@@ -293,6 +297,28 @@ drawEnd:  xor BX, BX        ; Page 0
           mov AH, 0Eh
           mov AL, coords[3] ; Destination Row
           int 10h
+          mov AX, 0E0Dh     ; 0x0D = '\r'
+          int 10h
+          mov AX, 0E0Ah     ; 0x0A = '\n'
+          int 10h
+
+          ;
+          ; Display a message based on last status, and reset status
+          ;
+          mov BX, [status]     ; Get current status
+          mov BX, msgTable[BX] ; Get address of relevant message
+          mov AL, [BX]         ; Get next character to print
+drawStr:  mov AH, 0Eh          ; BIOS video function E, write character
+          push BX              ; Backup address
+          xor BX, BX           ; Page 0
+          int 10h              ; BIOS video
+          pop BX               ; Restore address
+          inc BX               ; Next character
+          mov AL, [BX]         ; Get next character to print
+          test AL, 0FFh        ; Apparently mov doesn't set/clear the Zero Flag...
+          jnz drawStr          ; Loop until null terminator
+          mov status, 0        ; Reset status
+
           ret
 drawBoard ENDP
 
@@ -324,15 +350,154 @@ knight: ; check if there are knights in any of the 8 attacking positions
 check ENDP
 
 ;
+; Takes a word register (and references to its upper and lower byte), and the
+; location of a character coordinate pair, and converts them into an offset to
+; the board table/array. Pushes flags to stack - pop them and use the carry flag
+; to determine which of the two nibbles to read (CF = rightmost).
+;
+
+CRD2OFST MACRO reg, regH, regL, loc
+         mov reg, WORD PTR loc ; Get 2 char string of form AB where A is a letter and B is a number
+         sub reg, 3161h        ; Subtract 'a' from lower byte and '1' from upper byte
+         ; The operations up until the shl, are giving us the result of 7 - regH
+         sub regH, 7           ; Subtract 7 (translates 0-7 to 249-255)
+         not regH              ; Invert number (translates 249-255 to 6-255)
+         inc regH              ; Add 1 (translates 6-255 to 7-0)
+         shl regH, 1           ; Multiply row by 4 bytes
+         shl regH, 1
+         shr regL, 1           ; Divide columy by 2 (4 bytes long not 8)
+         pushf                 ; Store flags (we want CF later)
+         add regL, regH        ; Add column
+         xor regH, regH        ; Clear upper byte
+         ;mov regH, 0Fh         ; This mask will give us the leftmost of the 2 columns
+         ;popf                  ; Restore flags
+         ;jnc C2F_end           ; If we shifted out a 1, we need the rightmost of the 2 columns
+         ;not regH              ; So we'll invert the mask
+;C2F_end:
+         ENDM
+
+;
 ; Check if a move is valid
 ;
-valid PROC
-      ; Invalid move
-      mov WORD PTR coords[0], 2020h ; Clear source coordinate ("  ")
-      mov WORD PTR coords[2], 2020h ; Clear destination coordinate
-      xor DX, DX                    ; Set to 0 (to set Zero Flag)
-      ret
-valid ENDP
+valid       PROC
+            ;
+            ; Check if source is owned by current player
+            ;
+            CRD2OFST BX, BH, BL, coords[0] ; Get source coordinates and convert to board offset
+            mov DL, board[BX] ; Get two pieces from coordinates
+            popf              ; Restore flags
+            jnc valSrcTest    ; Continue to valid source test if no carry
+            shr DL, 1         ; Shift out leftmost of the 2 pieces
+            shr DL, 1
+            shr DL, 1
+            shr DL, 1
+valSrcTest: and DL, 0Fh       ; Clear upper nibble
+            ; Check if piece is actually a play piece and not an empty space
+            jz validEnd       ; That part of the board is not a valid piece (hopefully meaning it's a space ' ')
+
+            mov DH, DL        ; Copy piece to DH
+            and DH, 08h       ; Isolate player bit
+            shr DH, 1         ; Move player bit to LSB
+            shr DH, 1
+            shr DH, 1
+            ; Check player owns piece
+            xor DH, 1         ; Invert player (so cmp/jmp logic is inverted!)
+            cmp DH, [player]  ; Check if this piece is owned by the current player
+            je validEnd       ; If not, then this move is not legal
+
+            ;
+            ; Check if destination is now owned by current player
+            ;
+            or DX, 1    ; Clear Zero Flag
+            jmp validEnd ; Finish
+
+            ;
+            ; Clear coordinate stage and return
+            ;
+validEnd:   pushf                         ; Backup flags
+            jnz validClear                ; Skip if move was valid
+            mov status, 2                 ; Otherwise go to status 1 (byte 2)
+validClear: mov WORD PTR coords[0], 2020h ; Clear source coordinate ("  ")
+            mov WORD PTR coords[2], 2020h ; Clear destination coordinate
+            popf                          ; Restore flags
+            ret
+valid       ENDP
+
+;
+; Version of valid subroutine I wrote before I remembered the board data is stored as nibbles not ASCII characters... massive idiot moment
+;
+;0010 0000
+;
+;0101 0000
+;0101 0010
+;0100 1110
+;0100 0010
+;0101 0001
+;0100 1011
+;
+;0111 0000
+;0111 0010
+;0110 1110
+;0110 0010
+;0111 0001
+;0110 1011
+;
+;valid spaces have bit 7, so test with 40h
+;then test with 20h to get the player they belong to
+;then and with 1Fh to get relevant data
+;
+;1 0000
+;1 0010
+;0 1110
+;0 0010
+;1 0001
+;0 1011
+
+;valid       PROC
+;            ;
+;            ; Check if source is owned by current player
+;            ;
+;            CRD2OFST BX, BH, BL, coords[0] ; Get source coordinates and convert to board offset
+;            mov DL, board[BX] ; Get two pieces from coordinates
+;            popf              ; Restore flags
+;            jnc valSrcTest    ; Continue to valid source test if no carry
+;            shr DL, 1         ; Shift out leftmost of the 2 pieces
+;            shr DL, 1
+;            shr DL, 1
+;            shr DL, 1
+;valSrcTest: and DL, 0Fh       ; Clear upper nibble
+;            ; Check if piece is actually a play piece and not an empty space
+;            test DL, 40h      ; If test comes back negative
+;            jz validEnd       ; That part of the board is not a valid piece (hopefully meaning it's a space ' ')
+;
+;            mov DH, DL        ; Copy piece to DH
+;            and DH, 20h       ; Isolate player bit
+;            shr DH, 1         ; Move player bit to LSB
+;            shr DH, 1
+;            shr DH, 1
+;            shr DH, 1
+;            shr DH, 1
+;            ; Check player owns piece
+;            cmp DH, [player]  ; Check if this piece is owned by the current player
+;            jne valZeroEnd    ; If not, then this move is not legal
+;
+;            ;
+;            ; Check if destination is now owned by current player
+;            ;
+;            mov DX, 1    ; Clear Zero Flag
+;            jmp validEnd ; Finish
+;
+;            ; If we need to manually set zero flag before returning due to inverted logic
+;valZeroEnd: xor DX, DX ; Set to 0 (to set Zero Flag)
+;            ;
+;            ; Clear coordinate stage and return
+;            ;
+;validEnd:   pushf                         ; Backup flags
+;            mov WORD PTR coords[0], 2020h ; Clear source coordinate ("  ")
+;            mov WORD PTR coords[2], 2020h ; Clear destination coordinate
+;            popf                          ; Restore flags
+;            ret
+;valid       ENDP
 
 Code ENDS
 

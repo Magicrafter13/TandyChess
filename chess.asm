@@ -4,28 +4,32 @@ Stack    SEGMENT STACK
 theStack DB 8 DUP ("(C) Matthew R.  ") ; 8 * 16 bytes
 Stack    ENDS
 
-Data   SEGMENT PUBLIC
-board  DB 32 DUP (0) ; 32 bytes, one nibble per board tile
-player DB 0
-pieces DB " PRNBQK? prnbqk?"
-coords DB "    "     ; 4 bytes for two sets of chess board coordinates
-prompts DW prompt1,prompt2,prompt1,prompt2,prompt3
-move   DB 0          ; Current step for player move selection
-                     ; 0 - not started
-                     ; 1 - got first letter
-                     ; 2 - got first number (source tile selected)
-                     ; 3 - got second letter
-                     ; 4 - got second number (destination tile selected) - may not be used
-Data   ENDS
-
-; 000 empty space
-; 001 pawn
-; 010 rook
-; 011 knight
-; 100 bishop
-; 101 queen
-; 110 king
-; fourth bit for player
+Data    SEGMENT PUBLIC
+board   DB 32 DUP (0)  ; 32 bytes, one nibble per board tile
+                       ; 000 empty space
+                       ; 001 pawn
+                       ; 010 rook
+                       ; 011 knight
+                       ; 100 bishop
+                       ; 101 queen
+                       ; 110 king
+                       ; fourth bit for player
+player  DB 0           ; Current player
+pieces  DB " PRNBQK?", ; White pieces
+           " prnbqk?"  ; Black pieces
+coords  DB "    "      ; 4 bytes for two sets of chess board coordinates
+prompts DW prompt1,    ; Next parse source column
+           prompt2,    ; Next parse source row
+           prompt1,    ; Next parse destination column
+           prompt2,    ; Next parse destination row
+           prompt3     ; Next try move and reset
+move    DB 0           ; Current step for player move selection
+                       ; 0 - not started
+                       ; 1 - got first letter
+                       ; 2 - got first number (source tile selected)
+                       ; 3 - got second letter
+                       ; 4 - got second number (destination tile selected) - may not be used
+Data    ENDS
 
 Code SEGMENT PUBLIC
 
@@ -34,6 +38,7 @@ Code SEGMENT PUBLIC
 main      PROC
 start:    mov AX, Data
           mov DS, AX
+
           ;
           ; Initialize Board
           ;
@@ -61,52 +66,64 @@ start:    mov AX, Data
           sub BX, 28         ; (BX = board + 2) First row, second half
           mov [BX], AX       ; Place remaining black pieces
           ; Player should already be set to white by assembler
+
+          ;
+          ; Game loop
+          ;
 game:     call checkmate ; Check if player is checkmated
           jnz gameOver   ; If they are, show message, and then exit
           call check     ; Check if player is in check
           jz prompt      ; If not, skip the following instructions
           ;if they are, tell them
+
+          ;
+          ; User input
+          ;
 prompt:   call drawBoard ; Draw the chess board
           ; prompt player for move
-          xor AH, AH     ; Keyboard function 0, get keystroke
-          int 16h        ; Keyboard
-          cmp AL, 71h    ; 71h = 'q'
-          je gameOver    ; Quit
+          xor AH, AH         ; Keyboard function 0, get keystroke
+          int 16h            ; Keyboard
+          cmp AL, 71h        ; 71h = 'q'
+          je gameOver        ; Quit
           ; Read a move
-          mov BL, move   ; Get current move step (how far player is in making their move)
-          xor BH, BH     ; Clear BX
-          shl BX, 1      ; Multiply by 2 since addresses are words not bytes
-          jmp prompts[BX] ; Jump based on current step
+          mov BL, move       ; Get current move step (how far player is in making their move)
+          xor BH, BH         ; Clear BX
+          shl BX, 1          ; Multiply by 2 since addresses are words not bytes
+          jmp prompts[BX]    ; Jump based on current step
           ; Read in a letter
-prompt1:  sub AL, 61h    ; 61h = 'a'
-          jl prompt      ; Try again
-          sub AL, 8      ; AL -= 8
-          jge prompt     ; Try again
-          add AL, 69h    ; Restore column character
-          shr BX, 1      ; Unshift from earlier jump
+prompt1:  sub AL, 61h        ; 61h = 'a'
+          jl prompt          ; Try again
+          sub AL, 8          ; AL -= 8
+          jge prompt         ; Try again
+          add AL, 69h        ; Restore column character
+          shr BX, 1          ; Unshift from earlier jump
           mov coords[BX], AL ; Store in coordinate variable
-          inc BL         ; Next step
-          mov move, BL   ; Update in memory
+          inc BL             ; Next step
+          mov move, BL       ; Update in memory
           jmp prompt
           ; Read in a number
-prompt2:  sub AL, 31h    ; 31h = '1'
-          jl prompt      ; Try again
-          sub AL, 8      ; AL -= 8
-          jge prompt     ; Try again
-          add AL, 39h    ; Restore row character
-          shr BX, 1      ; Unshift from earlier jump
-          inc BL         ; Next step
-          mov move, BL   ; Update in memory
-          dec BL         ; DL is either 2 or 4, so now it will be 1 or 3
+prompt2:  sub AL, 31h        ; 31h = '1'
+          jl prompt          ; Try again
+          sub AL, 8          ; AL -= 8
+          jge prompt         ; Try again
+          add AL, 39h        ; Restore row character
+          shr BX, 1          ; Unshift from earlier jump
+          inc BL             ; Next step
+          mov move, BL       ; Update in memory
+          dec BL             ; DL is either 2 or 4, so now it will be 1 or 3
           mov coords[BX], AL ; Store in coordinate variable
           jmp prompt
           ; Confirm move
-prompt3:  mov move, 0    ; Set move step thingy to 0
-          call valid     ; Check if move is valid (and if player is in check, make sure move gets them out of check)
+prompt3:  mov move, 0        ; Set move step thingy to 0
+          call valid         ; Check if move is valid (and if player is in check, make sure move gets them out of check)
           jz prompt
           ; make move
-          xor [player], 1 ; change to other player's turn
+          xor [player], 1    ; change to other player's turn
           jmp game
+
+          ;
+          ; Game end
+          ;
 gameOver: mov AX, 4C00h
           int 21h
           ; EXIT 0
@@ -153,13 +170,13 @@ drawAH:   inc AL        ; AL++
           dec CX        ; CX-- (Printed one char)
           jnz drawAH    ; While CX != 0
           mov AX, 0E0Dh ; BIOS video function E, write single char and move cursor, AL = Carriage Return
-          xor BX, BX    ; Page 0
+          ;xor BX, BX    ; Page 0
           int 10h       ; BIOS video
           mov AX, 0E0Ah ; BIOS video function E, write single char and move cursor, AL = Line Feed
-          xor BX, BX    ; Page 0
+          ;xor BX, BX    ; Page 0
           int 10h       ; BIOS video
           mov AX, 0E0Ah ; BIOS video function E, write single char and move cursor, AL = Line Feed
-          xor BX, BX    ; Page 0
+          ;xor BX, BX    ; Page 0
           int 10h       ; BIOS video
 
           mov CX, -2    ; Count = -2
@@ -175,10 +192,10 @@ drawLoop: add CX, 2     ; Increment count by 2
           shr CX, 1     ; Divide count by 2
           shr CX, 1     ; DIvide count by 2 (now 4)
           sub AL, CL    ; (char)AL -= count / 4
-          xor BX, BX    ; Page 0
+          ;xor BX, BX    ; Page 0
           int 10h       ; BIOS video
           mov AX, 0E20h ; BIOS video function E, write single char and move cursor, AL = ' '
-          xor BX, BX    ; Page 0
+          ;xor BX, BX    ; Page 0
           int 10h       ; BIOS video
           pop CX        ; Rest of drawLoop needs CX
           push CX       ; But we still have to push it to maintain push/pop balance
@@ -186,109 +203,96 @@ drawLoop: add CX, 2     ; Increment count by 2
           ; Main draw, 8 characters per row
           ;
           ; First half of row CX
-drawRow:  lea BX, board       ; Get address of board data
-          add BX, CX          ; Use count as our offset
-          mov DX, [BX]        ; Get pieces
+drawRow:  mov BX, CX                  ; Use count as our offset TODO: possibly optimize so that count is already in BX?
+          mov DX, WORD PTR board[BX]  ; Get pieces (board data)
           ; Print first piece
-          mov BX, DX          ; Copy DX to BX
-          and BX, 0Fh         ; Get first nibble
-          mov AL, [pieces+BX] ; Get character for piece, from array
-          xor BX, BX          ; Page 0
-          mov AH, 0Eh         ; BIOS video function E, write single char and move cursor
-          push DX             ; Backup data from memory
-          int 10h             ; BIOS video
-          pop DX              ; Restore data from memory
+          mov BX, DX                  ; Copy DX to BX
+          and BX, 0Fh                 ; Get first nibble
+          mov AL, pieces[BX]          ; Get character for piece, from array
+          xor BX, BX                  ; Page 0
+          mov AH, 0Eh                 ; BIOS video function E, write single char and move cursor
+          push DX                     ; Backup data from memory
+          int 10h                     ; BIOS video
+          pop DX                      ; Restore data from memory
           shr DX, 1
           shr DX, 1
           shr DX, 1
-          shr DX, 1           ; Next piece (4 bits per piece)
+          shr DX, 1                   ; Next piece (4 bits per piece)
           ; Print second piece
-          mov BX, DX          ; Copy DX to BX
-          and BX, 0Fh         ; Get first nibble
-          mov AL, [pieces+BX] ; Get character for piece, from array
-          xor BX, BX          ; Page 0
-          mov AH, 0Eh         ; BIOS video function E, write single char and move cursor
-          push DX             ; Backup data from memory
-          int 10h             ; BIOS video
-          pop DX              ; Restore data from memory
+          mov BX, DX                  ; Copy DX to BX
+          and BX, 0Fh                 ; Get first nibble
+          mov AL, pieces[BX]          ; Get character for piece, from array
+          xor BX, BX                  ; Page 0
+          mov AH, 0Eh                 ; BIOS video function E, write single char and move cursor
+          push DX                     ; Backup data from memory
+          int 10h                     ; BIOS video
+          pop DX                      ; Restore data from memory
           shr DX, 1
           shr DX, 1
           shr DX, 1
-          shr DX, 1           ; Next piece (4 bits per piece)
+          shr DX, 1                   ; Next piece (4 bits per piece)
           ; Print third piece
-          mov BX, DX          ; Copy DX to BX
-          and BX, 0Fh         ; Get first nibble
-          mov AL, [pieces+BX] ; Get character for piece, from array
-          xor BX, BX          ; Page 0
-          mov AH, 0Eh         ; BIOS video function E, write single char and move cursor
-          push DX             ; Backup data from memory
-          int 10h             ; BIOS video
-          pop BX              ; Restore data from memory
+          mov BX, DX                  ; Copy DX to BX
+          and BX, 0Fh                 ; Get first nibble
+          mov AL, pieces[BX]          ; Get character for piece, from array
+          xor BX, BX                  ; Page 0
+          mov AH, 0Eh                 ; BIOS video function E, write single char and move cursor
+          push DX                     ; Backup data from memory
+          int 10h                     ; BIOS video
+          pop BX                      ; Restore data from memory
           shr BX, 1
           shr BX, 1
           shr BX, 1
-          shr BX, 1           ; Next piece (4 bits per piece)
+          shr BX, 1                   ; Next piece (4 bits per piece)
           ; Print fourth piece
-          mov AL, [pieces+BX] ; Get character for piece, from array
-          xor BX, BX          ; Page 0
-          mov AH, 0Eh         ; BIOS video function E, write single char and move cursor
-          int 10h             ; BIOS video
+          mov AL, pieces[BX]          ; Get character for piece, from array
+          xor BX, BX                  ; Page 0
+          mov AH, 0Eh                 ; BIOS video function E, write single char and move cursor
+          int 10h                     ; BIOS video
           ; Back to loop
-          pop CX              ; Restore count
-          test CX, 2          ; Check if CX is a multiple of 2, but not 4 (aka 2, 6, 10, etc)
-          jz drawLoop         ; If not, continue loop
-          push CX             ; Otherwise, backup count again, and print CRLF
-          mov AL, 0Dh         ; Carriage Return
-          xor BX, BX          ; Page 0
-          mov AH, 0Eh         ; BIOS video function E, write single char and move cursor
-          int 10h             ; BIOS video
-          mov AL, 0Ah         ; Line Feed
-          xor BX, BX          ; Page 0
-          mov AH, 0Eh         ; BIOS video function E, write single char and move cursor
-          int 10h             ; BIOS video
-          pop CX              ; Restore count
-          jmp drawLoop        ; Back to top
+          pop CX                      ; Restore count
+          test CX, 2                  ; Check if CX is a multiple of 2, but not 4 (aka 2, 6, 10, etc)
+          jz drawLoop                 ; If not, continue loop
+          push CX                     ; Otherwise, backup count again, and print CRLF
+          mov AL, 0Dh                 ; Carriage Return
+          ;xor BX, BX                  ; Page 0
+          mov AH, 0Eh                 ; BIOS video function E, write single char and move cursor
+          int 10h                     ; BIOS video
+          mov AL, 0Ah                 ; Line Feed
+          ;xor BX, BX                  ; Page 0
+          mov AH, 0Eh                 ; BIOS video function E, write single char and move cursor
+          int 10h                     ; BIOS video
+          pop CX                      ; Restore count
+          jmp drawLoop                ; Back to top
 
-drawEnd:  ; Board is done, now show staged move
-          xor BX, BX          ; Page 0
-          mov AX, 0E0Dh       ; BIOS video 0E, write char - 0x0D = '\r'
-          int 10h             ; BIOS video
-          mov AX, 0E0Ah       ; 0x0A = '\n'
-          int 10h
-          ;mov AX, 0E46h       ; 0x46 = 'F'
-          ;int 10h
-          ;mov AX, 0E20h       ; 0x20 = ' '
-          ;int 10h
-          mov AH, 0Eh
-          mov AL, coords[0]    ; Source Column
+          ;
+          ; Display currently staged move
+          ;
+drawEnd:  xor BX, BX        ; Page 0
+          mov AX, 0E0Dh     ; BIOS video 0E, write char - 0x0D = '\r'
+          int 10h           ; BIOS video
+          mov AX, 0E0Ah     ; 0x0A = '\n'
           int 10h
           mov AH, 0Eh
-          mov AL, coords[1]  ; Source Row
-          int 10h
-          ;mov AX, 0E0Dh       ; 0x0D = '\r'
-          ;int 10h
-          ;mov AX, 0E0Ah       ; 0x0A = '\n'
-          ;int 10h
-          mov AX, 0E20h       ; 0x20 = ' '
-          int 10h
-          mov AX, 0E74h       ; 0x74 = 't'
-          int 10h
-          mov AX, 0E6Fh       ; 0x6F = 'o'
-          int 10h
-          ;mov AX, 0E54h       ; 0x54 = 'T'
-          ;int 10h
-          mov AX, 0E20h       ; 0x20 = ' '
+          mov AL, coords[0] ; Source Column
           int 10h
           mov AH, 0Eh
-          mov AL, coords[2]  ; Destination Column
+          mov AL, coords[1] ; Source Row
+          int 10h
+          mov AX, 0E20h     ; 0x20 = ' '
+          int 10h
+          mov AX, 0E74h     ; 0x74 = 't'
+          int 10h
+          mov AX, 0E6Fh     ; 0x6F = 'o'
+          int 10h
+          mov AX, 0E20h     ; 0x20 = ' '
           int 10h
           mov AH, 0Eh
-          mov AL, coords[3]  ; Destination Row
+          mov AL, coords[2] ; Destination Column
           int 10h
-          ;mov AX, 0E0Dh       ; 0x0D = '\r'
-          ;int 10h
-          ;mov AX, 0E0Ah       ; 0x0A = '\n'
-          ;int 10h
+          mov AH, 0Eh
+          mov AL, coords[3] ; Destination Row
+          int 10h
           ret
 drawBoard ENDP
 
@@ -324,9 +328,9 @@ check ENDP
 ;
 valid PROC
       ; Invalid move
-      mov WORD PTR coords[0], 2020h ; Clear source coordinate
+      mov WORD PTR coords[0], 2020h ; Clear source coordinate ("  ")
       mov WORD PTR coords[2], 2020h ; Clear destination coordinate
-      xor DX, DX ; Set to 0 (to set Zero Flag)
+      xor DX, DX                    ; Set to 0 (to set Zero Flag)
       ret
 valid ENDP
 

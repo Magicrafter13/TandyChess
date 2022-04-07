@@ -365,15 +365,10 @@ CRD2OFST MACRO reg, regH, regL, loc
          inc regH              ; Add 1 (translates 6-255 to 7-0)
          shl regH, 1           ; Multiply row by 4 bytes
          shl regH, 1
-         shr regL, 1           ; Divide columy by 2 (4 bytes long not 8)
+         shr regL, 1           ; Divide column by 2 (4 bytes long not 8)
          pushf                 ; Store flags (we want CF later)
          add regL, regH        ; Add column
          xor regH, regH        ; Clear upper byte
-         ;mov regH, 0Fh         ; This mask will give us the leftmost of the 2 columns
-         ;popf                  ; Restore flags
-         ;jnc C2F_end           ; If we shifted out a 1, we need the rightmost of the 2 columns
-         ;not regH              ; So we'll invert the mask
-;C2F_end:
          ENDM
 
 ;
@@ -408,7 +403,7 @@ valSrcTest: and DL, 0Fh       ; Clear upper nibble
             ;
             ; Check if destination is now owned by current player
             ;
-            or DX, 1    ; Clear Zero Flag
+            or DX, 1     ; Clear Zero Flag
             jmp validEnd ; Finish
 
             ;
@@ -422,82 +417,6 @@ validClear: mov WORD PTR coords[0], 2020h ; Clear source coordinate ("  ")
             popf                          ; Restore flags
             ret
 valid       ENDP
-
-;
-; Version of valid subroutine I wrote before I remembered the board data is stored as nibbles not ASCII characters... massive idiot moment
-;
-;0010 0000
-;
-;0101 0000
-;0101 0010
-;0100 1110
-;0100 0010
-;0101 0001
-;0100 1011
-;
-;0111 0000
-;0111 0010
-;0110 1110
-;0110 0010
-;0111 0001
-;0110 1011
-;
-;valid spaces have bit 7, so test with 40h
-;then test with 20h to get the player they belong to
-;then and with 1Fh to get relevant data
-;
-;1 0000
-;1 0010
-;0 1110
-;0 0010
-;1 0001
-;0 1011
-
-;valid       PROC
-;            ;
-;            ; Check if source is owned by current player
-;            ;
-;            CRD2OFST BX, BH, BL, coords[0] ; Get source coordinates and convert to board offset
-;            mov DL, board[BX] ; Get two pieces from coordinates
-;            popf              ; Restore flags
-;            jnc valSrcTest    ; Continue to valid source test if no carry
-;            shr DL, 1         ; Shift out leftmost of the 2 pieces
-;            shr DL, 1
-;            shr DL, 1
-;            shr DL, 1
-;valSrcTest: and DL, 0Fh       ; Clear upper nibble
-;            ; Check if piece is actually a play piece and not an empty space
-;            test DL, 40h      ; If test comes back negative
-;            jz validEnd       ; That part of the board is not a valid piece (hopefully meaning it's a space ' ')
-;
-;            mov DH, DL        ; Copy piece to DH
-;            and DH, 20h       ; Isolate player bit
-;            shr DH, 1         ; Move player bit to LSB
-;            shr DH, 1
-;            shr DH, 1
-;            shr DH, 1
-;            shr DH, 1
-;            ; Check player owns piece
-;            cmp DH, [player]  ; Check if this piece is owned by the current player
-;            jne valZeroEnd    ; If not, then this move is not legal
-;
-;            ;
-;            ; Check if destination is now owned by current player
-;            ;
-;            mov DX, 1    ; Clear Zero Flag
-;            jmp validEnd ; Finish
-;
-;            ; If we need to manually set zero flag before returning due to inverted logic
-;valZeroEnd: xor DX, DX ; Set to 0 (to set Zero Flag)
-;            ;
-;            ; Clear coordinate stage and return
-;            ;
-;validEnd:   pushf                         ; Backup flags
-;            mov WORD PTR coords[0], 2020h ; Clear source coordinate ("  ")
-;            mov WORD PTR coords[2], 2020h ; Clear destination coordinate
-;            popf                          ; Restore flags
-;            ret
-;valid       ENDP
 
 Code ENDS
 

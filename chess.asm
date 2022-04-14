@@ -1,5 +1,32 @@
 .8086
 
+;
+; Takes a word register (and references to its upper and lower byte), and the
+; location of a character coordinate pair, and converts them into an offset to
+; the board table/array. Pushes flags to stack - pop them and use the carry flag
+; to determine which of the two nibbles to read (CF = rightmost).
+;
+
+CRD2OFST MACRO reg, regH, regL, loc
+         mov reg, WORD PTR loc ; Get 2 char string of form AB where A is a letter and B is a number
+         sub reg, 3161h        ; Subtract 'a' from lower byte and '1' from upper byte
+         ; The operations up until the shl, are giving us the result of 7 - regH
+         sub regH, 7           ; Subtract 7 (translates 0-7 to 249-255)
+         not regH              ; Invert number (translates 249-255 to 6-255)
+         inc regH              ; Add 1 (translates 6-255 to 7-0)
+         shl regH, 1           ; Multiply row by 4 bytes
+         shl regH, 1
+         shr regL, 1           ; Divide column by 2 (4 bytes long not 8)
+         pushf                 ; Store flags (we want CF later)
+         add regL, regH        ; Add column
+         xor regH, regH        ; Clear upper byte
+         ENDM
+
+CLRCOORD MACRO
+         mov WORD PTR coords[0], 2020h ; Clear source coordinate
+         mov WORD PTR coords[2], 2020h ; Clear destination coordinate
+         ENDM
+
 Stack    SEGMENT STACK
 theStack DB 8 DUP ("(C) Matthew R.  ") ; 8 * 16 bytes
 Stack    ENDS
@@ -40,6 +67,7 @@ valTable DW valEmpty,   ; Trying to move an empty space (ERROR)
             valBishop,  ; Moving a bishop
             valQueen,   ; Moving a queen
             valKing     ; Moving a king
+nibble   DB 0Fh, 0F0h   ; Mask to get nibble out of byte
 Data     ENDS
 
 Code SEGMENT PUBLIC
@@ -81,7 +109,8 @@ start:    mov AX, Data
           ;
           ; Game loop
           ;
-game:     call checkmate ; Check if player is checkmated
+game:     CLRCOORD       ; Clear coordinates
+          call checkmate ; Check if player is checkmated
           jnz gameOver   ; If they are, show message, and then exit
           call check     ; Check if player is in check
           jz prompt      ; If not, skip the following instructions
@@ -127,9 +156,69 @@ prompt2:  sub AL, 31h        ; 31h = '1'
           ; Confirm move
 prompt3:  mov move, 0        ; Set move step thingy to 0
           call valid         ; Check if move is valid (and if player is in check, make sure move gets them out of check)
-          jz prompt
-          ; make move
-          xor player, 1      ; change to other player's turn
+          jnz movMake
+          CLRCOORD           ; Clear coordinates
+          jmp prompt         ; Start move over
+
+          ;
+          ; Make Move
+          ;
+movMake:
+
+          ;
+          ; Remove the player's piece from its current position and store the piece in the stack
+          ;
+          CRD2OFST BX, BH, BL, coords[0] ; Get source coordinates and convert to board offset
+          mov DL, board[BX]  ; Get two pieces from coordinates
+          xor AX, AX         ; Clear AX
+          popf               ; Restore flags
+          pushf              ; Backup flags again
+          jnc movRead        ; Skip if we want leftmost piece
+          inc AX             ; +1 to get rightmost piece
+          ; Get piece being moved
+movRead:  push BX            ; Backup source offset
+          mov BX, AX         ; Move to base register
+          and DL, nibble[BX] ; Mask out the piece we want (i.e. 1011 0101 -> 1011 0000)
+          pop BX             ; Restore source offset
+          xor board[BX], DL  ; Remove selected piece from board
+          popf               ; Restore flags again
+          jnc movRDone       ; Skip if moving leftmost piece
+          shr DL, 1          ; Shift out leftmost piece so we have rightmost instead
+          shr DL, 1
+          shr DL, 1
+          shr DL, 1
+movRDone: push DX            ; Backup piece being moved
+
+          ;
+          ; Grab the destination byte, merge the piece that isn't being replaced with the one being moved, and write back to memory
+          ;
+          CRD2OFST BX, BH, BL, coords[2] ; Get destination coordinates and convert to board offset
+          mov DL, board[BX]  ; Get two pieces from coordinates
+          xor AX, AX         ; Clear AX
+          popf               ; Restore flags
+          pushf              ; Backup flags again
+          jc movRead2        ; Skip if we are replacing leftmost piece?
+          inc AX             ; +1 to replace rightmost piece
+          ; Get piece not being replaced
+movRead2: push BX            ; Backup destination offset
+          mov BX, AX         ; Move to base register
+          and DL, nibble[BX] ; Mask out the piece we are replacing (so we can or this with the piece being moved)
+          pop BX             ; Restore destination offset
+          popf               ; Restore flags again
+          pop AX             ; Restore piece being moved into AX (pushed from DX)
+          jnc movMerge       ; Skip if replacing the leftmost piece
+          shl AL, 1          ; We are replacing rightmost piece
+          shl AL, 1
+          shl AL, 1
+          shl AL, 1
+          ; At this point, AL contains the piece being moved (in the correct nibble), and DL contains the piece that isn't being replaced
+movMerge: or DL, AL          ; Merge the two pieces together
+          mov board[BX], DL  ; Commit to memory
+
+          ;
+          ; Update and continue game
+          ;
+          xor player, 1 ; change to other player's turn
           jmp game
 
           ;
@@ -357,28 +446,6 @@ knight: ; check if there are knights in any of the 8 attacking positions
 check ENDP
 
 ;
-; Takes a word register (and references to its upper and lower byte), and the
-; location of a character coordinate pair, and converts them into an offset to
-; the board table/array. Pushes flags to stack - pop them and use the carry flag
-; to determine which of the two nibbles to read (CF = rightmost).
-;
-
-CRD2OFST MACRO reg, regH, regL, loc
-         mov reg, WORD PTR loc ; Get 2 char string of form AB where A is a letter and B is a number
-         sub reg, 3161h        ; Subtract 'a' from lower byte and '1' from upper byte
-         ; The operations up until the shl, are giving us the result of 7 - regH
-         sub regH, 7           ; Subtract 7 (translates 0-7 to 249-255)
-         not regH              ; Invert number (translates 249-255 to 6-255)
-         inc regH              ; Add 1 (translates 6-255 to 7-0)
-         shl regH, 1           ; Multiply row by 4 bytes
-         shl regH, 1
-         shr regL, 1           ; Divide column by 2 (4 bytes long not 8)
-         pushf                 ; Store flags (we want CF later)
-         add regL, regH        ; Add column
-         xor regH, regH        ; Clear upper byte
-         ENDM
-
-;
 ; Check if a move is valid
 ;
 valid       PROC
@@ -437,16 +504,17 @@ valDstTest: and DL, 0Fh       ; Clear upper nibble
             ;
             ; Check if move is a valid chess play
             ;
-valChess:   pop DX ; Restore source piece
-            mov BX, DX ; Place in base register
-            shl BX, 1 ; Multiply by 2, so it becomes a word offset
+valChess:   pop DX           ; Restore source piece
+            mov BX, DX       ; Place in base register
+            shl BX, 1        ; Multiply by 2, so it becomes a word offset
+            and BX, 7        ; Only use first 3 bits
             jmp valTable[BX] ; Allowing us to jump to the correct check in the code
 
             ;
             ; An empty space was owned by the second player (binary 1000) - this should NEVER happen
             ;
 valEmpty:   
-            xor DX, DX   ; Set Zero Flag
+            xor DX, DX   ; Set Zero Flag (probably not necessary since the shl BX, 1 would have set the zero flag but this is for errors anyway so whatever)
             jmp validEnd ; Finish
 
             ;
@@ -467,6 +535,7 @@ valRook:
             ; Check if play is valid for knight
             ;
 valKnight:  mov AX, WORD PTR coords[2] ; Get destination x coordinate
+            ;sub AX, 3161h              ; Subtract 'a' from lower byte and '1' from upper byte
 
             ; Verify valid X coordinate (-2, -1, 1, or 2)
             sub AL, coords[0]          ; Subtract source x coordinate
@@ -487,9 +556,8 @@ vNPosY:     cmp AH, 2                  ; Check difference against 2
             ja validEndC               ; Knights cannot move more than 2 spaces in any direction
 
             ; Verify valid X,Y coordinates (+-2,+-1 or +-1,+-2 - in other words, the absolute value of the difference cannot be the same for X and Y)
-            cmp AH, AL                 ; Check X and Y differences
-            je validEnd                ; Knights move in L shapes - 2 spaces in one direction, and 1 in the other
-            jmp validEnd ; Finish
+            cmp AH, AL                 ; Check X and Y differences - ZF means invalid, NZ means valid, because:
+            jmp validEnd               ; Knights move in L shapes - 2 spaces in one direction, and 1 in the other
 
             ;
             ; Check if play is valid for bishop
@@ -508,22 +576,20 @@ valQueen:
             ;
             ; Check if play is valid for king
             ;
-valKing:
-            xor DX, DX   ; Set Zero Flag
+valKing:    ; TODO: check if move would place king in check...
+            ;xor DX, DX   ; Set Zero Flag
             jmp validEnd ; Finish
 
             ;
             ; Clear coordinate stage and return
             ;
-validEndC:  xor DX, DX                    ; Set Zero Flag
-            jmp validEnd                  ; Finish
-validEnd1:  pop DX                        ; Maintain stack balance...
-validEnd:   pushf                         ; Backup flags
-            jnz validClear                ; Skip if move was valid
-            mov status, 2                 ; Otherwise go to status 1 (byte 2)
-validClear: mov WORD PTR coords[0], 2020h ; Clear source coordinate ("  ")
-            mov WORD PTR coords[2], 2020h ; Clear destination coordinate
-            popf                          ; Restore flags
+validEndC:  xor DX, DX    ; Set Zero Flag
+            jmp validEnd  ; Finish
+validEnd1:  pop DX        ; Maintain stack balance...
+validEnd:   pushf         ; Backup flags
+            jnz valRet    ; Skip if move was valid
+            mov status, 2 ; Otherwise go to status 1 (byte 2)
+validRet:   popf          ; Restore flags
             ret
 valid       ENDP
 

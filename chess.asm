@@ -33,6 +33,13 @@ move     DB 0           ; Current step for player move selection
                         ; 2 - got first number (source tile selected)
                         ; 3 - got second letter
                         ; 4 - got second number (destination tile selected) - may not be used
+valTable DW valEmpty,   ; Trying to move an empty space (ERROR)
+            valPawn,    ; Moving a pawn
+            valRook,    ; Moving a rook
+            valKnight,  ; Moving a knight
+            valBishop,  ; Moving a bishop
+            valQueen,   ; Moving a queen
+            valKing     ; Moving a king
 Data     ENDS
 
 Code SEGMENT PUBLIC
@@ -399,6 +406,8 @@ valSrcTest: and DL, 0Fh       ; Clear upper nibble
             xor DH, 1         ; Invert player (so cmp/jmp logic is inverted!)
             cmp DH, [player]  ; Check if this piece is owned by the current player
             je validEnd       ; If not, then this move is not legal
+            xor DH, DH        ; Clear upper byte
+            push DX           ; Backup source piece
 
             ;
             ; Check if destination is now owned by current player
@@ -412,6 +421,7 @@ valSrcTest: and DL, 0Fh       ; Clear upper nibble
             shr DL, 1
             shr DL, 1
 valDstTest: and DL, 0Fh       ; Clear upper nibble
+            ;push DL           ; Backup destination piece
             ; Check if space is blank
             jz valChess       ; If so, skip to chess logic
 
@@ -422,18 +432,92 @@ valDstTest: and DL, 0Fh       ; Clear upper nibble
             shr DH, 1
             ; Check player doesn't own piece
             cmp DH, [player]  ; Check if this piece is owned by the current player
-            je validEnd       ; If so, then this move is not legal (otherwise this is a blank space, or an opponent's piece)
+            je validEnd1      ; If so, then this move is not legal (otherwise this is a blank space, or an opponent's piece)
 
             ;
             ; Check if move is a valid chess play
             ;
-valChess:
-            or DX, 1     ; Clear Zero Flag
+valChess:   pop DX ; Restore source piece
+            mov BX, DX ; Place in base register
+            shl BX, 1 ; Multiply by 2, so it becomes a word offset
+            jmp valTable[BX] ; Allowing us to jump to the correct check in the code
+
+            ;
+            ; An empty space was owned by the second player (binary 1000) - this should NEVER happen
+            ;
+valEmpty:   
+            xor DX, DX   ; Set Zero Flag
+            jmp validEnd ; Finish
+
+            ;
+            ; Check if play is valid for pawn
+            ;
+valPawn:
+            xor DX, DX   ; Set Zero Flag
+            jmp validEnd ; Finish
+
+            ;
+            ; Check if play is valid for rook
+            ;
+valRook:
+            xor DX, DX   ; Set Zero Flag
+            jmp validEnd ; Finish
+
+            ;
+            ; Check if play is valid for knight
+            ;
+valKnight:  mov AX, WORD PTR coords[2] ; Get destination x coordinate
+
+            ; Verify valid X coordinate (-2, -1, 1, or 2)
+            sub AL, coords[0]          ; Subtract source x coordinate
+            je validEnd                ; Knight's destination cannot be same column as source
+            ja vNPosX                  ; Jump over this code if the difference is positive
+            dec AL                     ; Subtract 1
+            not AL                     ; Then invert to get 2's compliment
+vNPosX:     cmp AL, 2                  ; Check difference against 2
+            ja validEndC               ; Knights cannot move more than 2 spaces in any direction
+
+            ; Verify valid Y coordinate (-2, -1, 1, or 2)
+            sub AH, coords[1]          ; Subtract source y coordinate
+            je validEnd                ; Knight's destination cannot be same row as source
+            ja vNPosY                  ; Jump over this code if the difference is positive
+            dec AH                     ; Subtract 1
+            not AH                     ; Then invert to get 2's compliment
+vNPosY:     cmp AH, 2                  ; Check difference against 2
+            ja validEndC               ; Knights cannot move more than 2 spaces in any direction
+
+            ; Verify valid X,Y coordinates (+-2,+-1 or +-1,+-2 - in other words, the absolute value of the difference cannot be the same for X and Y)
+            cmp AH, AL                 ; Check X and Y differences
+            je validEnd                ; Knights move in L shapes - 2 spaces in one direction, and 1 in the other
+            jmp validEnd ; Finish
+
+            ;
+            ; Check if play is valid for bishop
+            ;
+valBishop:
+            xor DX, DX   ; Set Zero Flag
+            jmp validEnd ; Finish
+
+            ;
+            ; Check if play is valid for queen
+            ;
+valQueen:
+            xor DX, DX   ; Set Zero Flag
+            jmp validEnd ; Finish
+
+            ;
+            ; Check if play is valid for king
+            ;
+valKing:
+            xor DX, DX   ; Set Zero Flag
             jmp validEnd ; Finish
 
             ;
             ; Clear coordinate stage and return
             ;
+validEndC:  xor DX, DX                    ; Set Zero Flag
+            jmp validEnd                  ; Finish
+validEnd1:  pop DX                        ; Maintain stack balance...
 validEnd:   pushf                         ; Backup flags
             jnz validClear                ; Skip if move was valid
             mov status, 2                 ; Otherwise go to status 1 (byte 2)

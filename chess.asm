@@ -403,6 +403,31 @@ valSrcTest: and DL, 0Fh       ; Clear upper nibble
             ;
             ; Check if destination is now owned by current player
             ;
+            CRD2OFST BX, BH, BL, coords[2] ; Get destination coordinates and convert to board offset
+            mov DL, board[BX] ; Get two pieces from coordinates
+            popf              ; Restore flags
+            jnc valDstTest    ; Continue to v alid destination test if no carry
+            shr DL, 1         ; Shift out leftmost of the 2 pieces
+            shr DL, 1
+            shr DL, 1
+            shr DL, 1
+valDstTest: and DL, 0Fh       ; Clear upper nibble
+            ; Check if space is blank
+            jz valChess       ; If so, skip to chess logic
+
+            mov DH, DL        ; Copy piece to DH
+            and DH, 08h       ; Isolate player bit
+            shr DH, 1         ; Move player bit to LSB
+            shr DH, 1
+            shr DH, 1
+            ; Check player doesn't own piece
+            cmp DH, [player]  ; Check if this piece is owned by the current player
+            je validEnd       ; If so, then this move is not legal (otherwise this is a blank space, or an opponent's piece)
+
+            ;
+            ; Check if move is a valid chess play
+            ;
+valChess:
             or DX, 1     ; Clear Zero Flag
             jmp validEnd ; Finish
 

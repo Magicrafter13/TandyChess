@@ -41,7 +41,7 @@ board    DB 32 DUP (0)  ; 32 bytes, one nibble per board tile
                         ; 101 queen
                         ; 110 king
                         ; fourth bit for player
-player   DB 0           ; Current player
+player   DB 0,0         ; Current player
 pieces   DB " PRNBQK?", ; White pieces
             " prnbqk?"  ; Black pieces
 message0 DB "Enter move > ",0
@@ -68,6 +68,12 @@ valTable DW validEmpty,   ; Trying to move an empty space (ERROR)
             validQueen,   ; Moving a queen
             validKing     ; Moving a king
 nibble   DB 0Fh, 0F0h     ; Mask to get nibble out of byte
+          ;
+          ; Pawn related constants
+          ;
+pawnStart DB 32h, 37h     ; (ASCII) coordinates for pawn starting row for each player (don't change this)
+pawnNormalMove DB 1, -1   ; DST-SRC difference per player
+pawnDoubleMove DB 2, -2   ; DST-SRC difference per player, double move
 Data     ENDS
 
 Code SEGMENT PUBLIC
@@ -137,9 +143,9 @@ prompt:
 promptLetter:
      ; Read in a letter
      sub AL, 61h        ; 61h = 'a'
-     jl prompt          ; Try again
+     jb prompt          ; Try again
      sub AL, 8          ; AL -= 8
-     jge prompt         ; Try again
+     jae prompt         ; Try again
      add AL, 69h        ; Restore column character
      shr BX, 1          ; Unshift from earlier jump
      mov coords[BX], AL ; Store in coordinate variable
@@ -150,9 +156,9 @@ promptLetter:
 promptNumber:
      ; Read in a number
      sub AL, 31h        ; 31h = '1'
-     jl prompt          ; Try again
+     jb prompt          ; Try again
      sub AL, 8          ; AL -= 8
-     jge prompt         ; Try again
+     jae prompt         ; Try again
      add AL, 39h        ; Restore row character
      shr BX, 1          ; Unshift from earlier jump
      inc BL             ; Next step
@@ -532,14 +538,102 @@ validPieceJump:
       ;
 validEmpty:   
       xor DX, DX      ; Set Zero Flag (probably not necessary since the shl BX, 1 would have set the zero flag but this is for errors anyway so whatever)
-      jmp validReturn ; Finish
+      ret
+      ;jmp validReturn ; Finish
 
       ;
       ; Check if play is valid for pawn
       ;
 validPawn:
-      xor DX, DX      ; Set Zero Flag
-      jmp validReturn ; Finish
+      mov AX, WORD PTR coords[2]     ; Get destination coordinates
+      mov BX, WORD PTR player        ; Get current player as offset
+
+      ; Check if moving within same column
+      sub AH, coords[1]              ; Subtract source y coordinate
+      cmp AH, pawnNormalMove[BX]     ; Check if pawn is moving single space forward
+      jne validPawnDouble            ; If not, check for double
+      sub AL, coords[0]              ; Subtract source x coordinate
+      jne validPawnSpecial           ; For diagonal attacks
+      ; Make sure destination doesn't have enemy piece since pawns can only attack diagonally
+      CRD2OFST BX, BH, BL, coords[2] ; Get destination coordinates and convert to board offset
+      mov DL, board[BX]              ; Get two pieces from coordinates
+      popf                           ; Restore flags
+      jnc validPawnAttack            ; Continue to valid destination test if no carry
+      shr DL, 1                      ; Shift out leftmost of the 2 pieces
+      shr DL, 1
+      shr DL, 1
+      shr DL, 1
+validPawnAttack:
+      and DL, 07h                    ; Clear upper nibble and player bit
+      jnz validSetAndReturn          ; If not zero, then a piece is impeding the progress of this pawn
+      or DX, 0FFFFh                  ; Something to clear the Zero Flag
+      ret
+
+validPawnSpecial:
+      ; Test if pawn is moving one space diagonally
+      cmp AL, 1                      ; Check if moving right one space or less
+      jg validSetAndReturn           ; If not, the move is invalid
+      cmp AL, -1                     ; Check if moving left one space or less
+      jl validSetAndReturn           ; If not, the move is invalid
+      shl AX, 1                      ; Something to clear the Zero Flag
+      CRD2OFST BX, BH, BL, coords[2] ; Get offset of destination piece
+      mov DL, board[BX]              ; Place pieces in DL
+      popf                           ; Restore flags
+      jnc validPawnSpecialEnemy      ; If no carry, skip (we want leftmost piece)
+      shr DL, 1                      ; Shift out leftmost piece to get rightmost
+      shr DL, 1
+      shr DL, 1
+      shr DL, 1
+validPawnSpecialEnemy:
+      and DL, 0Fh                    ; Mask out upper nibble
+      jz validSetAndReturn           ; If nothing remains, the piece is empty and the move is invalid
+      shr DL, 1                      ; Move player bit to LSB (and shift out actual piece)
+      shr DL, 1
+      shr DL, 1
+      cmp DL, player[0]              ; Check if piece is owned by other player
+      ret
+
+validPawnDouble:
+      ; Test if pawn is moving two spaces, from starting position
+      cmp AH, pawnDoubleMove[BX]     ; Check if moving two spaces forward
+      jne validSetAndReturn          ; If not, the move isn't valid
+      mov DL, pawnStart[BX]          ; Get starting row for this player's pawns
+      cmp DL, coords[1]              ; Check if pawn is in said row
+      jne validSetAndReturn          ; If not, the move isn't valid
+      ; Make sure path is not blocked
+      CRD2OFST BX, BH, BL, coords[0] ; Get offset of source piece
+      mov AL, player[0]              ; Get current player
+      xor AL, DL                     ; Clear DL
+      shr AX, 1                      ; Shift player bit into AX (so AX is now 0 or 8)
+      sub AX, 4                      ; Subtract 4 (so now AX is -4 or 4)
+      ; Check if first space in front of pawn is empty
+      add BX, AX                     ; Add this to the base register so we get the next row
+      mov DL, board[BX]              ; Place pieces in DL
+      popf                           ; Restore flags
+      pushf                          ; Backup flags (again)
+      jnc validPawnDoubleSafeCheck1  ; If no carry, skip (we want leftmost piece)
+      shr DL, 1                      ; Shift out leftmost piece to get rightmost
+      shr DL, 1
+      shr DL, 1
+      shr DL, 1
+validPawnDoubleSafeCheck1:
+      and DL, 07h                    ; Clear upper nibble and player bit
+      jnz validPopSetAndReturn       ; If not zero, then a piece is impeding the progress of this pawn
+      ; Check if second space in front of pawn is empty
+      add BX, AX                     ; Get next row (again)
+      mov DL, board[BX]              ; Place pieces in DL
+      popf                           ; Restore flags (again)
+      jnc validPawnDoubleSafeCheck2  ; If no carry, skip (we want leftmost piece)
+      shr DL, 1                      ; Shift out leftmost piece to get rightmost
+      shr DL, 1
+      shr DL, 1
+      shr DL, 1
+validPawnDoubleSafeCheck2:
+      and DL, 07h                    ; Clear upper nibble and player bit
+      jnz validSetAndReturn          ; If not zero, then a piece is impeding the progress of this pawn
+      ; Path is clear, move is valid
+      or DX, 0FFFFh                  ; Something to clear the Zero Flag
+      ret
 
       ;
       ; Check if play is valid for rook
@@ -551,32 +645,33 @@ validRook:
       ;
       ; Check if play is valid for knight
       ;
-validKnight:  mov AX, WORD PTR coords[2] ; Get destination x coordinate
-      ;sub AX, 3161h           ; Subtract 'a' from lower byte and '1' from upper byte
+validKnight:
+      mov AX, WORD PTR coords[2] ; Get destination coordinates
+      ;sub AX, 3161h            ; Subtract 'a' from lower byte and '1' from upper byte
 
       ; Verify valid X coordinate (-2, -1, 1, or 2)
-      sub AL, coords[0]       ; Subtract source x coordinate
-      je validReturn          ; Knight's destination cannot be same column as source
-      ja validKnightPositiveX ; Jump over this code if the difference is positive
-      dec AL                  ; Subtract 1
-      not AL                  ; Then invert to get 2's compliment
+      sub AL, coords[0]        ; Subtract source x coordinate
+      je validReturn           ; Knight's destination cannot be same column as source
+      jg validKnightPositiveX  ; Jump over this code if the difference is positive
+      dec AL                   ; Subtract 1
+      not AL                   ; Then invert to get 2's compliment
 validKnightPositiveX:
-      cmp AL, 2               ; Check difference against 2
-      ja validClearAndReturn  ; Knights cannot move more than 2 spaces in any direction
+      cmp AL, 2                ; Check difference against 2
+      jg validSetAndReturn     ; Knights cannot move more than 2 spaces in any direction
 
       ; Verify valid Y coordinate (-2, -1, 1, or 2)
-      sub AH, coords[1]       ; Subtract source y coordinate
-      je validReturn          ; Knight's destination cannot be same row as source
-      ja validKnightPositiveY ; Jump over this code if the difference is positive
-      dec AH                  ; Subtract 1
-      not AH                  ; Then invert to get 2's compliment
+      sub AH, coords[1]        ; Subtract source y coordinate
+      je validReturn           ; Knight's destination cannot be same row as source
+      jg validKnightPositiveY  ; Jump over this code if the difference is positive
+      dec AH                   ; Subtract 1
+      not AH                   ; Then invert to get 2's compliment
 validKnightPositiveY:
-      cmp AH, 2               ; Check difference against 2
-      ja validClearAndReturn  ; Knights cannot move more than 2 spaces in any direction
+      cmp AH, 2                ; Check difference against 2
+      jg validSetAndReturn     ; Knights cannot move more than 2 spaces in any direction
 
       ; Verify valid X,Y coordinates (+-2,+-1 or +-1,+-2 - in other words, the absolute value of the difference cannot be the same for X and Y)
-      cmp AH, AL              ; Check X and Y differences - ZF means invalid, NZ means valid, because:
-      jmp validReturn         ; Knights move in L shapes - 2 spaces in one direction, and 1 in the other
+      cmp AH, AL               ; Check X and Y differences - ZF means invalid, NZ means valid, because:
+      jmp validReturn          ; Knights move in L shapes - 2 spaces in one direction, and 1 in the other
 
       ;
       ; Check if play is valid for bishop
@@ -600,11 +695,18 @@ validKing: ; TODO: check if move would place king in check...
       jmp validReturn ; Finish
 
       ;
-      ; Clear coordinate stage and return
+      ; Return
       ;
-validClearAndReturn:
+validPopSetAndReturn:
+      pop DX             ; Maintain stack balance...
+validSetAndReturn:
       xor DX, DX         ; Set Zero Flag
-      jmp validReturn    ; Finish
+      mov status, 2      ; Otherwise go to status 1 (byte 2)
+      ret
+validClearAndReturn:
+      xor DX, DX         ; Set to 0
+      inc DX             ; Clear Zero Flag
+      ret
 validPopAndReturn:
       pop DX             ; Maintain stack balance...
 validReturn:

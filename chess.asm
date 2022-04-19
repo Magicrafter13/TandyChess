@@ -529,8 +529,8 @@ validDestinationTest:
 validPieceJump:
       pop DX           ; Restore source piece
       mov BX, DX       ; Place in base register
-      shl BX, 1        ; Multiply by 2, so it becomes a word offset
       and BX, 7        ; Only use first 3 bits
+      shl BX, 1        ; Multiply by 2, so it becomes a word offset
       jmp valTable[BX] ; Allowing us to jump to the correct check in the code
 
       ;
@@ -543,6 +543,11 @@ validEmpty:
 
       ;
       ; Check if play is valid for pawn
+      ;
+      ; Currently implemented:
+      ; - Move forward one space
+      ; - Move forward two spaces if in starting row
+      ; - Attack diagonally
       ;
 validPawn:
       mov AX, WORD PTR coords[2]     ; Get destination coordinates
@@ -602,9 +607,10 @@ validPawnDouble:
       jne validSetAndReturn          ; If not, the move isn't valid
       ; Make sure path is not blocked
       CRD2OFST BX, BH, BL, coords[0] ; Get offset of source piece
-      mov AL, player[0]              ; Get current player
-      xor AL, DL                     ; Clear DL
-      shr AX, 1                      ; Shift player bit into AX (so AX is now 0 or 8)
+      mov AX, WORD PTR player        ; Get current player
+      shl AX, 1                      ; Shift player bit into AX (so AX is now 0 or 8)
+      shl AX, 1
+      shl AX, 1
       sub AX, 4                      ; Subtract 4 (so now AX is -4 or 4)
       ; Check if first space in front of pawn is empty
       add BX, AX                     ; Add this to the base register so we get the next row
@@ -690,9 +696,24 @@ validQueen:
       ;
       ; Check if play is valid for king
       ;
+      ; Currently implemented:
+      ; - Move any direction one space
+      ;
 validKing: ; TODO: check if move would place king in check...
-      ;xor DX, DX      ; Set Zero Flag
-      jmp validReturn ; Finish
+      mov AX, WORD PTR coords[2] ; Get destination coordinates
+
+      ; Check if moving within same column and row
+      sub AH, coords[1]          ; Subtract source y coordinate
+      cmp AH, 1                  ; Check against 1
+      jg validSetAndReturn       ; Invalid if more than one space vertically
+      cmp AH, -1                 ; Check against -1
+      jl validSetAndReturn       ; See above
+      sub AL, coords[0]          ; Subtract source x coordinate
+      cmp AL, 1                  ; Check against 1
+      jg validSetAndReturn       ; Invalid if more than one space horizontally
+      cmp AL, -2                 ; Check against -2
+      jle validSetAndReturn      ; See above
+      ret                        ; Unless AL is -2, the Zero Flag will be cleared
 
       ;
       ; Return

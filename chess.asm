@@ -11,41 +11,20 @@ CRD2OFST MACRO W, loc
          mov &W&X, WORD PTR loc ; Get 2 char string of form AB where A is a letter and B is a number
          sub &W&X, 3161h        ; Subtract 'a' from lower byte and '1' from upper byte
          ; The operations up until the shl, are giving us the result of 7 - regH
-         sub &W&H, 7           ; Subtract 7 (translates 0-7 to 249-255)
-         not &W&H              ; Invert number (translates 249-255 to 6-255)
-         inc &W&H              ; Add 1 (translates 6-255 to 7-0)
-         shl &W&H, 1           ; Multiply row by 8 bytes
+         sub &W&H, 7            ; Subtract 7 (translates 0-7 to 249-255)
+         not &W&H               ; Invert number (translates 249-255 to 6-255)
+         inc &W&H               ; Add 1 (translates 6-255 to 7-0)
+         shl &W&H, 1            ; Multiply row by 8 bytes
          shl &W&H, 1
          shl &W&H, 1
-         add &W&L, &W&H        ; Add column
-         xor &W&H, &W&H        ; Clear upper byte
+         add &W&L, &W&H         ; Add column
+         xor &W&H, &W&H         ; Clear upper byte
          ENDM
 
 CLRCOORD MACRO
          mov WORD PTR coords[0], 2020h ; Clear source coordinate
          mov WORD PTR coords[2], 2020h ; Clear destination coordinate
          ENDM
-
-;
-; Quick putc (assumes BH is already 0)
-; Assumes BX is the address of an array, and AL is the index.
-; Translates (xlat) that index and returns the value into AL
-; Then sets AH and prints
-;
-XLATPUTC MACRO
-         xlat        ; Use AL index into BX and return value into AL
-         mov AH, 0Eh ; BIOS video function E, TTY write character
-         int 10h     ; Call BIOS
-         ENDM
-
-;
-; Quick putc (assumes AH is already set to 0Eh and BH is already 0)
-; Must provide AL value
-;
-LPUTC MACRO char
-      mov AL, char ; Place character in AL
-      int 10h      ; BIOS video
-      ENDM
 
 Stack    SEGMENT STACK
 theStack byte 8 DUP ("(C) Matthew R.  ") ; 8 * 16 bytes
@@ -92,9 +71,9 @@ pieces byte \
   \           ; which is called the most)
   " prnbqk?"  ; Black pieces
 
-; Various in-game messages
-move_prompt byte "Enter move > ",0 ; Shown while waiting for a move to be input
-illegal_move byte "Illegal move! ",0 ; Shown when a move is attempted but it's
+; Various in-game messages (prefixed with length of string)
+move_prompt byte 13,"Enter move > " ; Shown while waiting for a move to be input
+illegal_move byte 14,"Illegal move! " ; Shown when a move is attempted but it's
                                      ; not valid
 message_table word \
   move_prompt,
@@ -145,7 +124,25 @@ pawnStart byte 32h, 37h ; (ASCII) coordinates for pawn starting row for each
 pawnNormalMove byte 1, -1 ; DST-SRC difference per player
 pawnDoubleMove byte 2, -2 ; DST-SRC difference per player, double move
 
-; 197 bytes of RAM up to this point - try to keep all printable text below 256 to optimize int 10h (AH=0Eh)
+; ASCII a-h
+letters word 6261h, 6463h, 6665h, 6867h
+
+; Carriage Return, Line Feed
+crlf byte 0Dh, 0Ah
+
+; ASCII 8-1
+numbers byte 38h, 37h, 36h, 35h, 34h, 33h, 32h, 31h
+
+; ASCII " to "
+spacer word 7420h, 206Fh
+
+; 205 bytes of RAM up to this point - try to keep all printable text below 256 to optimize int 10h (AH=0Eh)
+
+; Original video mode (when program began)
+video_mode byte 0, 0 ; extra byte for word padding (and BIOS video function 0)
+
+; Buffer to stage text to be printed
+print_buffer byte 256 dup ('$') ; 256 bytes, using MS-DOS string terminator ($)
 
 Data     ENDS
 
@@ -158,7 +155,14 @@ start:
      mov AX, Data
      mov DS, AX
      mov ES, AX
-     cld          ; Clear Direction
+     cld                ; Clear Direction
+     ; Clear Screen
+     mov AH, 0Fh        ; BIOS video function F, get video mode
+     xor BH, BH         ; BH = 0
+     int 10h            ; BIOS video
+     mov video_mode, AL ; Store for exit
+     mov AX, 0001h      ; BIOS video function 0, set video mode - mode 1, 40x25, 16 color
+     int 10h            ; BIOS video
 
      ;
      ; Initialize Game
@@ -244,11 +248,11 @@ promptCheck:
 moveExecute:
      ; Get piece being moved and remove it from the board
      CRD2OFST B, coords[0] ; Get source coordinates and convert to board offset
-     mov DL, board[BX]              ; Get two pieces from coordinates
-     mov board[BX], 0               ; Remove selected piece from board
+     mov DL, board[BX]     ; Get two pieces from coordinates
+     mov board[BX], 0      ; Remove selected piece from board
      ; Get the destination and replace whatever is there with the piece
      CRD2OFST B, coords[2] ; Get destination coordinates and convert to board offset
-     mov board[BX], DL              ; Place piece in new location
+     mov board[BX], DL     ; Place piece in new location
 
      ;
      ; Update and continue game
@@ -260,21 +264,27 @@ moveExecute:
      ; Game end
      ;
 gameOver:
-     mov AX, 4C00h
-     int 21h
+     mov AX, word ptr [video_mode] ; Get original video mode (BIOS video function 0, set video mode)
+     int 10h                       ; BIOS video - restore video mode
+     mov AX, 4C00h                 ; MS-DOS function 4C, exit - errorlevel = 00
+     int 21h                       ; MS-DOS
 main ENDP
+
+BUFFERPAIR MACRO
+           ; Next pair
+           lodsw         ; Get 2 pieces from board
+           and AX, 1717h ; Get owner and piece type for both pieces
+           ; Get ASCII values
+           xlat
+           xchg AL, AH
+           xlat
+           xchg AL, AH
+           ; Store
+           stosw
+           ENDM
 
 ; optional: draw board from current player's perspective
 drawBoard PROC
-          ;
-          ; Clear Screen
-          ;
-          mov AH, 0Fh ; BIOS video function F, get video mode
-          xor BH, BH  ; BH = 0
-          int 10h     ; BIOS video
-          xor AH, AH  ; BIOS video function 0, set video mode
-          int 10h     ; BIOS video
-
           ;
           ; Move cursor to top left
           ;
@@ -287,129 +297,72 @@ drawBoard PROC
           int 10h     ; BIOS video
 
           ;
-          ; Print board
+          ; Buffer horizontal coordinates
           ;
-          mov AX, 0E20h ; BIOS video function E, write single char and move cursor, AL = 20h = ' '
-          xor BX, BX    ; Page 0
-          push AX       ; Backup function
-          int 10h       ; BIOS video
-          pop AX        ; Restore function
-          int 10h       ; BIOS video
-          mov AX, 0E60h ; BIOS video function E, write single char and move cursor, AL = 61h = 'a'
-          mov CX, 8     ; Count = 8
-drawAH:
-          inc AL        ; AL++
-          int 10h       ; BIOS video (print a-h)
-          loop drawAH   ; while (--count)
-          mov AL, 0Dh   ; BIOS video function E, write single char and move cursor, AL = Carriage Return
-          ;xor BX, BX    ; Page 0
-          int 10h       ; BIOS video
-          mov AL, 0Ah   ; BIOS video function E, write single char and move cursor, AL = Line Feed
-          ;xor BX, BX    ; Page 0
-          int 10h       ; BIOS video
-          ;mov AX, 0E0Ah ; BIOS video function E, write single char and move cursor, AL = Line Feed
-          ;xor BX, BX    ; Page 0
-          int 10h       ; BIOS video
+          mov word ptr print_buffer, 2020h ; Two spaces
+          lea DI, print_buffer[2]          ; Stage all text here
+          mov CX, 4                        ; Count = 8
+          lea SI, letters                  ; ASCII a-h
+          rep movsw                        ; Copy a-h to buffer
+          lea SI, crlf                     ; Carriage Return, Line Feed
+          movsw                            ; Copy CRLF to buffer
+          dec SI                           ; Back up
+          movsb                            ; Copy LF
 
           ;
-          ; Draw row loop + vertical coordinates
+          ; Buffer rows + vertical coordinates
           ;
-          mov CX, 8     ; Count = 8 (rows to print)
-          lea SI, board ; SI = address of board data
+          ; Init loop
           lea BX, pieces ; ASCII data
-          mov AH, 0Eh   ; BIOS video E, write character
+          mov CX, 8      ; Count = 8 (rows to print)
+          lea SI, board  ; SI = address of board data
 drawLoop:
-          ; Row coordinate character
-          mov AL, 30h   ; BIOS video function E, write single character and move cursor, print character 38h ('8')
-          add AL, CL    ; (char)AL += count
-          int 10h       ; BIOS video
-          LPUTC 20h     ; BIOS video, write ' '
-          ;
-          ; Draw one row of the board
-          ;
-drawRow:
-          ; Next pair
-          lodsw          ; Get 2 pieces from board
-          ; Print first piece
-          push AX        ; Backup pieces
-          and AL, 17h    ; Get owner and piece type
-          XLATPUTC       ; Get character and write
-          pop AX         ; Restore pieces
-          xchg AL, AH    ; Swap first with second piece
-          ; Print second piece
-          and AX, 17h    ; Get owner and piece type
-          XLATPUTC       ; Get character and write
-          ; Next pair
-          lodsw          ; Get 2 pieces from board
-          ; Print third piece
-          push AX        ; Backup pieces
-          and AL, 17h    ; Get owner and piece type
-          XLATPUTC       ; Get character and write
-          pop AX         ; Restore pieces
-          xchg AL, AH    ; Swap first with second piece
-          ; Print fourth piece
-          and AX, 17h    ; Get owner and piece type
-          XLATPUTC       ; Get character and write
-          ; Next pair
-          lodsw          ; Get 2 pieces from board
-          ; Print fifth piece
-          push AX        ; Backup pieces
-          and AL, 17h    ; Get owner and piece type
-          XLATPUTC       ; Get character and write
-          pop AX         ; Restore pieces
-          xchg AL, AH    ; Swap first with second piece
-          ; Print sixth piece
-          and AX, 17h    ; Get owner and piece type
-          XLATPUTC       ; Get character and write
-          ; Next pair
-          lodsw          ; Get 2 pieces from board
-          ; Print seventh piece
-          push AX        ; Backup pieces
-          and AL, 17h    ; Get owner and piece type
-          XLATPUTC       ; Get character and write
-          pop AX         ; Restore pieces
-          xchg AL, AH    ; Swap first with second piece
-          ; Print eighth piece
-          and AX, 17h    ; Get owner and piece type
-          XLATPUTC       ; Get character and write
-          ; Back to loop
-          LPUTC 0Dh      ; Write Carriage Return
-          LPUTC 0Ah      ; Write Line Feed
-          ;dec CX         ; --count
-          ;jnz drawLoop   ; Next row if unfinished
+          ; Row coordinate into buffer
+          mov AX, 2030h  ; ASCII 20h = ' ', 38-31h = '8'-'1'
+          add AL, CL     ; (char)AL += count
+          stosw          ; Copy to buffer
+          ; Load one row of the board into the buffer
+          BUFFERPAIR
+          BUFFERPAIR
+          BUFFERPAIR
+          BUFFERPAIR
+          ; Newline into buffer and continue loop
+          push SI        ; Backup board index
+          lea SI, crlf   ; Carriage Return, Line Feed
+          movsw          ; Copy CRLF to buffer
+          pop SI         ; Restore board index
           loop drawLoop  ; Next row if unfinished (decrements CX)
 
           ;
-          ; Display currently staged move
+          ; Buffer currently staged move
           ;
 drawEnd:
-          ; TODO: switch to MS-DOS calls, and stage characters in temp buffer so we can print a single string
-          LPUTC 0Dh      ; Write Carriage Return
-          LPUTC 0Ah      ; Write Line Feed
-          LPUTC coords[0] ; Write source column
-          LPUTC coords[1] ; Write source row
-          LPUTC 20h      ; Write ' '
-          LPUTC 74h      ; Write 't'
-          LPUTC 6Fh      ; Write 'o'
-          LPUTC 20h      ; Write ' '
-          LPUTC coords[2] ; Write destination column
-          LPUTC coords[3] ; Write destination row
-          LPUTC 0Dh      ; Write Carriage Return
-          LPUTC 0Ah      ; Write Line Feed
+          lea SI, crlf      ; Carriage Return, Line Feed
+          movsw             ; Copy CRLF to buffer
+          lea SI, coords[0] ; Source coordinates
+          movsw             ; Copy coordinates to buffer
+          lea SI, spacer    ; " to "
+          movsw             ; Copy to buffer
+          movsw
+          lea SI, coords[2] ; Destination coordinates
+          movsw             ; Copy coordinates to buffer
+          lea SI, crlf      ; Carriage Return, Line Feed
+          movsw             ; Copy CRLF to buffer
 
           ;
           ; Display a message based on last status, and reset status
           ;
           mov BX, [status]          ; Get current status
-          mov BX, message_table[BX] ; Get address of relevant message
-          mov AL, [BX]              ; Get next character to print
-          mov AH, 0Eh               ; BIOS video function E, write character
-drawString:
-          int 10h                   ; BIOS video
-          inc BX                    ; Next character (index)
-          mov AL, [BX]              ; Get next character to print
-          test AL, 0FFh             ; Apparently mov doesn't set/clear the Zero Flag...
-          jnz drawString            ; Loop until null terminator
+          mov SI, message_table[BX] ; Read from relevant message
+          lodsb                     ; Get string length
+          mov CL, AL                ; Use as count
+          xor CH, CH                ; Clear upper byte
+          rep movsb                 ; Copy message to buffer
+          mov AL, 24h               ; 24h = '$'
+          stosb                     ; Copy to buffer to terminate string
+          lea DX, print_buffer      ; Back to start of buffer
+          mov AH, 09h               ; MS-DOS function 9, write string to stdout
+          int 21h                   ; MS-DOS
           mov status, 0             ; Reset status
 
           ret
@@ -469,20 +422,20 @@ valid PROC
       ; Check if destination is now owned by current player
       ;
       CRD2OFST B, coords[2] ; Get destination coordinates and convert to board offset
-      mov DL, board[BX]        ; Get two pieces from coordinates
-      and DL, 07h              ; Get piece info
-      ;push DL                  ; Backup destination piece
-      jz validPieceJump        ; If destination is empty, skip following logic
+      mov DL, board[BX]     ; Get two pieces from coordinates
+      and DL, 07h           ; Get piece info
+      ;push DL               ; Backup destination piece
+      jz validPieceJump     ; If destination is empty, skip following logic
 
-      mov DH, DL               ; Copy piece to DH
-      and DH, 10h              ; Isolate player bit
-      shr DH, 1                ; Move player bit to LSB
+      mov DH, DL            ; Copy piece to DH
+      and DH, 10h           ; Isolate player bit
+      shr DH, 1             ; Move player bit to LSB
       shr DH, 1
       shr DH, 1
       shr DH, 1
       ; Check player doesn't own piece
-      cmp DH, [player]         ; Check if this piece is owned by the current player
-      je validPopAndReturn     ; If so, then this move is not legal (otherwise this is a blank space, or an opponent's piece)
+      cmp DH, [player]      ; Check if this piece is owned by the current player
+      je validPopAndReturn  ; If so, then this move is not legal (otherwise this is a blank space, or an opponent's piece)
 
       ;
       ; Check if move is a valid chess play
@@ -512,68 +465,63 @@ validEmpty:
       ; - Attack diagonally
       ;
 validPawn:
-      mov AX, WORD PTR coords[2]     ; Get destination coordinates
-      mov BX, WORD PTR player        ; Get current player as offset
+      mov AX, word ptr coords[2] ; Get destination coordinates
+      mov BX, word ptr player    ; Get current player as offset
 
       ; Check if moving within same column
-      sub AH, coords[1]              ; Subtract source y coordinate
-      cmp AH, pawnNormalMove[BX]     ; Check if pawn is moving single space forward
-      jne validPawnDouble            ; If not, check for double
-      sub AL, coords[0]              ; Subtract source x coordinate
-      jne validPawnSpecial           ; For diagonal attacks
+      sub AH, coords[1]          ; Subtract source y coordinate
+      cmp AH, pawnNormalMove[BX] ; Check if pawn is moving single space forward
+      jne validPawnDouble        ; If not, check for double
+      sub AL, coords[0]          ; Subtract source x coordinate
+      jne validPawnSpecial       ; For diagonal attacks
       ; Make sure destination doesn't have enemy piece since pawns can only attack diagonally
-      CRD2OFST B, coords[2] ; Get destination coordinates and convert to board offset
-      mov DL, board[BX]              ; Get destination piece
-      and DL, 07h                    ; Get piece data
-      jnz validSetAndReturn          ; If not zero, then a piece is impeding the progress of this pawn
-      or DX, 0FFFFh                  ; Something to clear the Zero Flag
+      CRD2OFST B, coords[2]      ; Get destination coordinates and convert to board offset
+      mov DL, board[BX]          ; Get destination piece
+      and DL, 07h                ; Get piece data
+      jnz validSetAndReturn      ; If not zero, then a piece is impeding the progress of this pawn
+      or DX, 0FFFFh              ; Something to clear the Zero Flag
       ret
 
 validPawnSpecial:
       ; Test if pawn is moving one space diagonally
-      cmp AL, 1                      ; Check if moving right one space or less
-      jg validSetAndReturn           ; If not, the move is invalid
-      cmp AL, -1                     ; Check if moving left one space or less
-      jl validSetAndReturn           ; If not, the move is invalid
-      shl AX, 1                      ; Something to clear the Zero Flag
-      CRD2OFST B, coords[2] ; Get offset of destination piece
-      mov DL, board[BX]              ; Place pieces in DL
-      test DL, 07h                   ; Check if space has piece
-      jz validReturn                 ; If not, the move is invalid
-      ;shr DL, 1                      ; Move player bit to LSB (and shift out actual piece)
-      ;shr DL, 1
-      ;shr DL, 1
-      ;shr DL, 1
-      ;cmp DL, player[0]              ; Check if piece is owned by other player
-      ret                            ; We can assume the destination is not
-                                     ; owned by the player due to the global
-                                     ; validation checks
+      cmp AL, 1                  ; Check if moving right one space or less
+      jg validSetAndReturn       ; If not, the move is invalid
+      cmp AL, -1                 ; Check if moving left one space or less
+      jl validSetAndReturn       ; If not, the move is invalid
+      shl AX, 1                  ; Something to clear the Zero Flag
+      CRD2OFST B, coords[2]      ; Get offset of destination piece
+      mov DL, board[BX]          ; Place pieces in DL
+      test DL, 07h               ; Check if space has piece
+      jz validReturn             ; If not, the move is invalid
+      ret                        ; We can assume the destination is not
+                                 ; owned by the player due to the global
+                                 ; validation checks
 
 validPawnDouble:
       ; Test if pawn is moving two spaces, from starting position
-      cmp AH, pawnDoubleMove[BX]     ; Check if moving two spaces forward
-      jne validSetAndReturn          ; If not, the move isn't valid
-      mov DL, pawnStart[BX]          ; Get starting row for this player's pawns
-      cmp DL, coords[1]              ; Check if pawn is in said row
-      jne validSetAndReturn          ; If not, the move isn't valid
+      cmp AH, pawnDoubleMove[BX] ; Check if moving two spaces forward
+      jne validSetAndReturn      ; If not, the move isn't valid
+      mov DL, pawnStart[BX]      ; Get starting row for this player's pawns
+      cmp DL, coords[1]          ; Check if pawn is in said row
+      jne validSetAndReturn      ; If not, the move isn't valid
       ; Make sure path is not blocked
-      CRD2OFST B, coords[0] ; Get offset of source piece
-      mov AX, WORD PTR player        ; Get current player
-      shl AX, 1                      ; Shift player bit into AX (so AX is now 0 or 16)
+      CRD2OFST B, coords[0]      ; Get offset of source piece
+      mov AX, word ptr player    ; Get current player
+      shl AX, 1                  ; Shift player bit into AX (so AX is now 0 or 16)
       shl AX, 1
       shl AX, 1
       shl AX, 1
-      sub AX, 8                      ; Subtract 8 (so now AX is -8 or 8)
+      sub AX, 8                  ; Subtract 8 (so now AX is -8 or 8)
       ; Check if first space in front of pawn is empty
-      add BX, AX                     ; Add this to the base register so we get the next row
-      test board[BX], 07h            ; Check if space is empty
-      jnz validSetAndReturn          ; If not zero, then a piece is impeding the progress of this pawn
+      add BX, AX                 ; Add this to the base register so we get the next row
+      test board[BX], 07h        ; Check if space is empty
+      jnz validSetAndReturn      ; If not zero, then a piece is impeding the progress of this pawn
       ; Check if second space in front of pawn is empty
-      add BX, AX                     ; Get next row (again)
-      test board[BX], 07h            ; Check if space is empty
-      jnz validSetAndReturn          ; If not zero, then a piece is impeding the progress of this pawn
+      add BX, AX                 ; Get next row (again)
+      test board[BX], 07h        ; Check if space is empty
+      jnz validSetAndReturn      ; If not zero, then a piece is impeding the progress of this pawn
       ; Path is clear, move is valid
-      or DX, 0FFFFh                  ; Something to clear the Zero Flag
+      or DX, 0FFFFh              ; Something to clear the Zero Flag
       ret
 
       ;
@@ -590,29 +538,29 @@ validRook:
       ; - Move in valid L shape
       ;
 validKnight:
-      mov AX, WORD PTR coords[2] ; Get destination coordinates
+      mov AX, word ptr coords[2] ; Get destination coordinates
 
       ; Verify valid X coordinate (-2, -1, 1, or 2)
-      sub AL, coords[0]        ; Subtract source x coordinate
-      je validReturn           ; Knight's destination cannot be same column as source
-      jg validKnightPositiveX  ; Jump over this code if the difference is positive
-      neg AL                   ; Turn negative into positive
+      sub AL, coords[0]          ; Subtract source x coordinate
+      je validReturn             ; Knight's destination cannot be same column as source
+      jg validKnightPositiveX    ; Jump over this code if the difference is positive
+      neg AL                     ; Turn negative into positive
 validKnightPositiveX:
-      cmp AL, 2                ; Check difference against 2
-      jg validSetAndReturn     ; Knights cannot move more than 2 spaces in any direction
+      cmp AL, 2                  ; Check difference against 2
+      jg validSetAndReturn       ; Knights cannot move more than 2 spaces in any direction
 
       ; Verify valid Y coordinate (-2, -1, 1, or 2)
-      sub AH, coords[1]        ; Subtract source y coordinate
-      je validReturn           ; Knight's destination cannot be same row as source
-      jg validKnightPositiveY  ; Jump over this code if the difference is positive
-      neg AH                   ; Turn negative into positive
+      sub AH, coords[1]          ; Subtract source y coordinate
+      je validReturn             ; Knight's destination cannot be same row as source
+      jg validKnightPositiveY    ; Jump over this code if the difference is positive
+      neg AH                     ; Turn negative into positive
 validKnightPositiveY:
-      cmp AH, 2                ; Check difference against 2
-      jg validSetAndReturn     ; Knights cannot move more than 2 spaces in any direction
+      cmp AH, 2                  ; Check difference against 2
+      jg validSetAndReturn       ; Knights cannot move more than 2 spaces in any direction
 
       ; Verify valid X,Y coordinates (+-2,+-1 or +-1,+-2 - in other words, the absolute value of the difference cannot be the same for X and Y)
-      cmp AH, AL               ; Check X and Y differences - ZF means invalid, NZ means valid, because:
-      jmp validReturn          ; Knights move in L shapes - 2 spaces in one direction, and 1 in the other
+      cmp AH, AL                 ; Check X and Y differences - ZF means invalid, NZ means valid, because:
+      jmp validReturn            ; Knights move in L shapes - 2 spaces in one direction, and 1 in the other
 
       ;
       ; Check if play is valid for bishop
@@ -635,7 +583,7 @@ validQueen:
       ; - Move any direction one space
       ;
 validKing: ; TODO: check if move would place king in check...
-      mov AX, WORD PTR coords[2] ; Get destination coordinates
+      mov AX, word ptr coords[2] ; Get destination coordinates
 
       ; Check if moving within same column and row
       sub AH, coords[1]          ; Subtract source y coordinate

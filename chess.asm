@@ -7,18 +7,18 @@
 ; to determine which of the two nibbles to read (CF = rightmost).
 ;
 
-CRD2OFST MACRO reg, regH, regL, loc
-         mov reg, WORD PTR loc ; Get 2 char string of form AB where A is a letter and B is a number
-         sub reg, 3161h        ; Subtract 'a' from lower byte and '1' from upper byte
+CRD2OFST MACRO W, loc
+         mov &W&X, WORD PTR loc ; Get 2 char string of form AB where A is a letter and B is a number
+         sub &W&X, 3161h        ; Subtract 'a' from lower byte and '1' from upper byte
          ; The operations up until the shl, are giving us the result of 7 - regH
-         sub regH, 7           ; Subtract 7 (translates 0-7 to 249-255)
-         not regH              ; Invert number (translates 249-255 to 6-255)
-         inc regH              ; Add 1 (translates 6-255 to 7-0)
-         shl regH, 1           ; Multiply row by 8 bytes
-         shl regH, 1
-         shl regH, 1
-         add regL, regH        ; Add column
-         xor regH, regH        ; Clear upper byte
+         sub &W&H, 7           ; Subtract 7 (translates 0-7 to 249-255)
+         not &W&H              ; Invert number (translates 249-255 to 6-255)
+         inc &W&H              ; Add 1 (translates 6-255 to 7-0)
+         shl &W&H, 1           ; Multiply row by 8 bytes
+         shl &W&H, 1
+         shl &W&H, 1
+         add &W&L, &W&H        ; Add column
+         xor &W&H, &W&H        ; Clear upper byte
          ENDM
 
 CLRCOORD MACRO
@@ -221,12 +221,12 @@ promptCheck:
      ;
 moveExecute:
      ; Get piece being moved and remove it from the board
-     CRD2OFST BX, BH, BL, coords[0] ; Get source coordinates and convert to board offset
+     CRD2OFST B, coords[0] ; Get source coordinates and convert to board offset
      mov DL, board[BX]              ; Get two pieces from coordinates
      mov board[BX], 0               ; Remove selected piece from board
      push DX                        ; Backup piece being moved
      ; Get the destination and replace whatever is there with the piece
-     CRD2OFST BX, BH, BL, coords[2] ; Get destination coordinates and convert to board offset
+     CRD2OFST B, coords[2] ; Get destination coordinates and convert to board offset
      mov board[BX], DL              ; Place piece in new location
 
      ;
@@ -282,8 +282,7 @@ drawAH:
           push CX       ; Backup count
           int 10h       ; BIOS video
           pop CX        ; Restore count
-          dec CX        ; CX-- (Printed one char)
-          jnz drawAH    ; While CX != 0
+          loop drawAH   ; while (--count)
           mov AX, 0E0Dh ; BIOS video function E, write single char and move cursor, AL = Carriage Return
           ;xor BX, BX    ; Page 0
           int 10h       ; BIOS video
@@ -294,122 +293,113 @@ drawAH:
           ;xor BX, BX    ; Page 0
           int 10h       ; BIOS video
 
-          mov CX, -8    ; Count = -8
+          ;
+          ; Draw row loop + vertical coordinates
+          ;
+          mov CX, 8     ; Count = 8 (rows to print)
+          lea SI, board ; SI = address of board data
 drawLoop:
-          add CX, 8     ; Increment count by 8
-          cmp CX, 64    ; 64 / 8 = 8, 8 rows
-          je drawEnd    ; If we've drawn 8 rows, stop
           push CX       ; Backup count
           ; Row coordinate character
-          mov AX, 0E38h ; BIOS video function E, write single character and move cursor, print character 38h ('8')
-          shr CX, 1     ; Divide count by 2
-          shr CX, 1     ; Divide count by 2
-          shr CX, 1     ; DIvide count by 2 (now 8)
-          sub AL, CL    ; (char)AL -= count / 8
+          mov AX, 0E30h ; BIOS video function E, write single character and move cursor, print character 38h ('8')
+          add AL, CL    ; (char)AL += count
           ;xor BX, BX    ; Page 0
           int 10h       ; BIOS video
           mov AX, 0E20h ; BIOS video function E, write single char and move cursor, AL = ' '
           ;xor BX, BX    ; Page 0
           int 10h       ; BIOS video
           ;
-          ; Main draw, 8 characters per row
+          ; Draw one row of the board
           ;
 drawRow:
-          pop BX       ; Use count as our offset TODO: possibly optimize so that count is already in BX?
-          push BX        ; Backup count for next iteration
-          mov DX, WORD PTR board[BX]   ; Get pieces (board data)
+          ; Next pair
+          lodsw          ; Get 2 pieces from board
           ; Print first piece
-          mov BX, DX                   ; Copy DX to BX
-          and BX, 17h                  ; Get owner and piece type
-          mov AL, pieces[BX]           ; Get character for piece, from array
-          xor BX, BX                   ; Page 0
-          mov AH, 0Eh                  ; BIOS video function E, write single char and move cursor
-          push DX                      ; Backup data from memory
-          int 10h                      ; BIOS video
-          pop DX                       ; Restore data from memory
-          xchg DL, DH                  ; Swap first with second piece
+          push AX        ; Backup pieces
+          lea BX, pieces ; ASCII data
+          and AL, 17h    ; Get owner and piece type
+          xlat           ; Get piece's ASCII character
+          xor BX, BX     ; Page 0
+          mov AH, 0Eh    ; BIOS video function E, write single char and move cursor
+          int 10h        ; BIOS video
+          pop AX         ; Restore pieces
+          xchg AL, AH    ; Swap first with second piece
           ; Print second piece
-          mov BX, DX                   ; Copy DX to BX
-          and BX, 17h                  ; Get owner and piece type
-          ; xlat
-          mov AL, pieces[BX]           ; Get character for piece, from array
-          xor BX, BX                   ; Page 0
-          mov AH, 0Eh                  ; BIOS video function E, write single char and move cursor
-          int 10h                      ; BIOS video
+          and AX, 17h    ; Get owner and piece type
+          lea BX, pieces ; ASCII data
+          xlat           ; Get piece's ASCII character
+          xor BX, BX     ; Page 0
+          mov AH, 0Eh    ; BIOS video function E, write single char and move cursor
+          int 10h        ; BIOS video
           ; Next pair
-          pop BX                       ; Restore count as offset
-          push BX                      ; But backup again for next pair
-          mov DX, WORD PTR board[BX+2] ; Get pieces (board data)
+          lodsw          ; Get 2 pieces from board
           ; Print third piece
-          mov BX, DX                   ; Copy DX to BX
-          and BX, 17h                  ; Get owner and piece type
-          mov AL, pieces[BX]           ; Get character for piece, from array
-          xor BX, BX                   ; Page 0
-          mov AH, 0Eh                  ; BIOS video function E, write single char and move cursor
-          push DX                      ; Backup data from memory
-          int 10h                      ; BIOS video
-          pop DX                       ; Restore data from memory
-          xchg DL, DH                  ; Swap first with second piece
+          push AX        ; Backup pieces
+          lea BX, pieces ; ASCII data
+          and AL, 17h    ; Get owner and piece type
+          xlat           ; Get piece's ASCII character
+          xor BX, BX     ; Page 0
+          mov AH, 0Eh    ; BIOS video function E, write single char and move cursor
+          int 10h        ; BIOS video
+          pop AX         ; Restore pieces
+          xchg AL, AH    ; Swap first with second piece
           ; Print fourth piece
-          mov BX, DX                   ; Copy DX to BX
-          and BX, 17h                  ; Get owner and piece type
-          mov AL, pieces[BX]           ; Get character for piece, from array
-          xor BX, BX                   ; Page 0
-          mov AH, 0Eh                  ; BIOS video function E, write single char and move cursor
-          int 10h                      ; BIOS video
+          and AX, 17h    ; Get owner and piece type
+          lea BX, pieces ; ASCII data
+          xlat           ; Get piece's ASCII character
+          xor BX, BX     ; Page 0
+          mov AH, 0Eh    ; BIOS video function E, write single char and move cursor
+          int 10h        ; BIOS video
           ; Next pair
-          pop BX                       ; Restore count as offset
-          push BX                      ; But backup again for next pair
-          mov DX, WORD PTR board[BX+4] ; Get pieces (board data)
+          lodsw          ; Get 2 pieces from board
           ; Print fifth piece
-          mov BX, DX                   ; Copy DX to BX
-          and BX, 17h                  ; Get owner and piece type
-          mov AL, pieces[BX]           ; Get character for piece, from array
-          xor BX, BX                   ; Page 0
-          mov AH, 0Eh                  ; BIOS video function E, write single char and move cursor
-          push DX                      ; Backup data from memory
-          int 10h                      ; BIOS video
-          pop DX                       ; Restore data from memory
-          xchg DL, DH                  ; Swap first with second piece
+          push AX        ; Backup pieces
+          lea BX, pieces ; ASCII data
+          and AL, 17h    ; Get owner and piece type
+          xlat           ; Get piece's ASCII character
+          xor BX, BX     ; Page 0
+          mov AH, 0Eh    ; BIOS video function E, write single char and move cursor
+          int 10h        ; BIOS video
+          pop AX         ; Restore pieces
+          xchg AL, AH    ; Swap first with second piece
           ; Print sixth piece
-          mov BX, DX                   ; Copy DX to BX
-          and BX, 17h                  ; Get owner and piece type
-          mov AL, pieces[BX]           ; Get character for piece, from array
-          xor BX, BX                   ; Page 0
-          mov AH, 0Eh                  ; BIOS video function E, write single char and move cursor
-          int 10h                      ; BIOS video
+          and AX, 17h    ; Get owner and piece type
+          lea BX, pieces ; ASCII data
+          xlat           ; Get piece's ASCII character
+          xor BX, BX     ; Page 0
+          mov AH, 0Eh    ; BIOS video function E, write single char and move cursor
+          int 10h        ; BIOS video
           ; Next pair
-          pop BX                       ; Restore count as offset
-          push BX                      ; But backup again for next pair
-          mov DX, WORD PTR board[BX+6] ; Get pieces (board data)
+          lodsw          ; Get 2 pieces from board
           ; Print seventh piece
-          mov BX, DX                   ; Copy DX to BX
-          and BX, 17h                  ; Get owner and piece type
-          mov AL, pieces[BX]           ; Get character for piece, from array
-          xor BX, BX                   ; Page 0
-          mov AH, 0Eh                  ; BIOS video function E, write single char and move cursor
-          push DX                      ; Backup data from memory
-          int 10h                      ; BIOS video
-          pop DX                       ; Restore data from memory
-          xchg DL, DH                  ; Swap first with second piece
-          ; Print eigth piece
-          mov BX, DX                   ; Copy DX to BX
-          and BX, 17h                  ; Get owner and piece type
-          mov AL, pieces[BX]           ; Get character for piece, from array
-          xor BX, BX                   ; Page 0
-          mov AH, 0Eh                  ; BIOS video function E, write single char and move cursor
-          int 10h                      ; BIOS video
+          push AX        ; Backup pieces
+          lea BX, pieces ; ASCII data
+          and AL, 17h    ; Get owner and piece type
+          xlat           ; Get piece's ASCII character
+          xor BX, BX     ; Page 0
+          mov AH, 0Eh    ; BIOS video function E, write single char and move cursor
+          int 10h        ; BIOS video
+          pop AX         ; Restore pieces
+          xchg AL, AH    ; Swap first with second piece
+          ; Print eighth piece
+          and AX, 17h    ; Get owner and piece type
+          lea BX, pieces ; ASCII data
+          xlat           ; Get piece's ASCII character
+          xor BX, BX     ; Page 0
+          mov AH, 0Eh    ; BIOS video function E, write single char and move cursor
+          int 10h        ; BIOS video
           ; Back to loop
-          mov AL, 0Dh                  ; Carriage Return
-          ;xor BX, BX                   ; Page 0
-          mov AH, 0Eh                  ; BIOS video function E, write single char and move cursor
-          int 10h                      ; BIOS video
-          mov AL, 0Ah                  ; Line Feed
-          ;xor BX, BX                   ; Page 0
-          mov AH, 0Eh                  ; BIOS video function E, write single char and move cursor
-          int 10h                      ; BIOS video
-          pop CX                       ; Restore count
-          jmp drawLoop                 ; Back to top
+          ;xor BX, BX     ; Page 0
+          mov AX, 0E0Dh  ; BIOS E, write char - Carriage Return
+          int 10h        ; BIOS video
+          ;xor BX, BX     ; Page 0
+          mov AX, 0E0Ah  ; BIOS E, write char - Line Feed
+          int 10h        ; BIOS video
+          pop CX         ; Restore count
+          dec CX         ; --count
+          jnz drawLoop   ; Next row if unfinished
+          ; TODO: test this below line on real hardware. The jump is too large right now, but if we got rid of some safety push/pops...
+          ;loop drawLoop  ; Next row if unfinished (decrements CX)
 
           ;
           ; Display currently staged move
@@ -500,7 +490,7 @@ valid PROC
       ;
       ; Check if source is owned by current player
       ;
-      CRD2OFST BX, BH, BL, coords[0] ; Get source coordinates and convert to board offset
+      CRD2OFST B, coords[0] ; Get source coordinates and convert to board offset
       mov DL, board[BX]     ; Get source pieces from coordinates
       test DL, 07h          ; Get piece info
       jz validReturn        ; Invalid move if empty space
@@ -519,7 +509,7 @@ valid PROC
       ;
       ; Check if destination is now owned by current player
       ;
-      CRD2OFST BX, BH, BL, coords[2] ; Get destination coordinates and convert to board offset
+      CRD2OFST B, coords[2] ; Get destination coordinates and convert to board offset
       mov DL, board[BX]        ; Get two pieces from coordinates
       and DL, 07h              ; Get piece info
       ;push DL                  ; Backup destination piece
@@ -573,7 +563,7 @@ validPawn:
       sub AL, coords[0]              ; Subtract source x coordinate
       jne validPawnSpecial           ; For diagonal attacks
       ; Make sure destination doesn't have enemy piece since pawns can only attack diagonally
-      CRD2OFST BX, BH, BL, coords[2] ; Get destination coordinates and convert to board offset
+      CRD2OFST B, coords[2] ; Get destination coordinates and convert to board offset
       mov DL, board[BX]              ; Get destination piece
       and DL, 07h                    ; Get piece data
       jnz validSetAndReturn          ; If not zero, then a piece is impeding the progress of this pawn
@@ -587,7 +577,7 @@ validPawnSpecial:
       cmp AL, -1                     ; Check if moving left one space or less
       jl validSetAndReturn           ; If not, the move is invalid
       shl AX, 1                      ; Something to clear the Zero Flag
-      CRD2OFST BX, BH, BL, coords[2] ; Get offset of destination piece
+      CRD2OFST B, coords[2] ; Get offset of destination piece
       mov DL, board[BX]              ; Place pieces in DL
       test DL, 07h                   ; Check if space has piece
       jz validReturn                 ; If not, the move is invalid
@@ -608,12 +598,13 @@ validPawnDouble:
       cmp DL, coords[1]              ; Check if pawn is in said row
       jne validSetAndReturn          ; If not, the move isn't valid
       ; Make sure path is not blocked
-      CRD2OFST BX, BH, BL, coords[0] ; Get offset of source piece
+      CRD2OFST B, coords[0] ; Get offset of source piece
       mov AX, WORD PTR player        ; Get current player
-      shl AX, 1                      ; Shift player bit into AX (so AX is now 0 or 8)
+      shl AX, 1                      ; Shift player bit into AX (so AX is now 0 or 16)
       shl AX, 1
       shl AX, 1
-      sub AX, 4                      ; Subtract 4 (so now AX is -4 or 4)
+      shl AX, 1
+      sub AX, 8                      ; Subtract 8 (so now AX is -8 or 8)
       ; Check if first space in front of pawn is empty
       add BX, AX                     ; Add this to the base register so we get the next row
       test board[BX], 07h            ; Check if space is empty

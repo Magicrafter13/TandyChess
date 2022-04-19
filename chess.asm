@@ -26,6 +26,27 @@ CLRCOORD MACRO
          mov WORD PTR coords[2], 2020h ; Clear destination coordinate
          ENDM
 
+;
+; Quick putc (assumes BH is already 0)
+; Assumes BX is the address of an array, and AL is the index.
+; Translates (xlat) that index and returns the value into AL
+; Then sets AH and prints
+;
+XLATPUTC MACRO
+         xlat        ; Use AL index into BX and return value into AL
+         mov AH, 0Eh ; BIOS video function E, TTY write character
+         int 10h     ; Call BIOS
+         ENDM
+
+;
+; Quick putc (assumes AH is already set to 0Eh and BH is already 0)
+; Must provide AL value
+;
+LPUTC MACRO char
+      mov AL, char ; Place character in AL
+      int 10h      ; BIOS video
+      ENDM
+
 Stack    SEGMENT STACK
 theStack byte 8 DUP ("(C) Matthew R.  ") ; 8 * 16 bytes
 Stack    ENDS
@@ -280,10 +301,10 @@ drawAH:
           inc AL        ; AL++
           int 10h       ; BIOS video (print a-h)
           loop drawAH   ; while (--count)
-          mov AX, 0E0Dh ; BIOS video function E, write single char and move cursor, AL = Carriage Return
+          mov AL, 0Dh   ; BIOS video function E, write single char and move cursor, AL = Carriage Return
           ;xor BX, BX    ; Page 0
           int 10h       ; BIOS video
-          mov AX, 0E0Ah ; BIOS video function E, write single char and move cursor, AL = Line Feed
+          mov AL, 0Ah   ; BIOS video function E, write single char and move cursor, AL = Line Feed
           ;xor BX, BX    ; Page 0
           int 10h       ; BIOS video
           ;mov AX, 0E0Ah ; BIOS video function E, write single char and move cursor, AL = Line Feed
@@ -296,16 +317,13 @@ drawAH:
           mov CX, 8     ; Count = 8 (rows to print)
           lea SI, board ; SI = address of board data
           lea BX, pieces ; ASCII data
+          mov AH, 0Eh   ; BIOS video E, write character
 drawLoop:
-          ;push CX       ; Backup count
           ; Row coordinate character
-          mov AX, 0E30h ; BIOS video function E, write single character and move cursor, print character 38h ('8')
+          mov AL, 30h   ; BIOS video function E, write single character and move cursor, print character 38h ('8')
           add AL, CL    ; (char)AL += count
-          ;xor BX, BX    ; Page 0
           int 10h       ; BIOS video
-          mov AX, 0E20h ; BIOS video function E, write single char and move cursor, AL = ' '
-          ;xor BX, BX    ; Page 0
-          int 10h       ; BIOS video
+          LPUTC 20h     ; BIOS video, write ' '
           ;
           ; Draw one row of the board
           ;
@@ -314,119 +332,70 @@ drawRow:
           lodsw          ; Get 2 pieces from board
           ; Print first piece
           push AX        ; Backup pieces
-          ;lea BX, pieces ; ASCII data
           and AL, 17h    ; Get owner and piece type
-          xlat           ; Get piece's ASCII character
-          ;xor BX, BX     ; Page 0
-          mov AH, 0Eh    ; BIOS video function E, write single char and move cursor
-          int 10h        ; BIOS video
+          XLATPUTC       ; Get character and write
           pop AX         ; Restore pieces
           xchg AL, AH    ; Swap first with second piece
           ; Print second piece
           and AX, 17h    ; Get owner and piece type
-          ;lea BX, pieces ; ASCII data
-          xlat           ; Get piece's ASCII character
-          ;xor BX, BX     ; Page 0
-          mov AH, 0Eh    ; BIOS video function E, write single char and move cursor
-          int 10h        ; BIOS video
+          XLATPUTC       ; Get character and write
           ; Next pair
           lodsw          ; Get 2 pieces from board
           ; Print third piece
           push AX        ; Backup pieces
-          ;lea BX, pieces ; ASCII data
           and AL, 17h    ; Get owner and piece type
-          xlat           ; Get piece's ASCII character
-          ;xor BX, BX     ; Page 0
-          mov AH, 0Eh    ; BIOS video function E, write single char and move cursor
-          int 10h        ; BIOS video
+          XLATPUTC       ; Get character and write
           pop AX         ; Restore pieces
           xchg AL, AH    ; Swap first with second piece
           ; Print fourth piece
           and AX, 17h    ; Get owner and piece type
-          ;lea BX, pieces ; ASCII data
-          xlat           ; Get piece's ASCII character
-          ;xor BX, BX     ; Page 0
-          mov AH, 0Eh    ; BIOS video function E, write single char and move cursor
-          int 10h        ; BIOS video
+          XLATPUTC       ; Get character and write
           ; Next pair
           lodsw          ; Get 2 pieces from board
           ; Print fifth piece
           push AX        ; Backup pieces
-          ;lea BX, pieces ; ASCII data
           and AL, 17h    ; Get owner and piece type
-          xlat           ; Get piece's ASCII character
-          ;xor BX, BX     ; Page 0
-          mov AH, 0Eh    ; BIOS video function E, write single char and move cursor
-          int 10h        ; BIOS video
+          XLATPUTC       ; Get character and write
           pop AX         ; Restore pieces
           xchg AL, AH    ; Swap first with second piece
           ; Print sixth piece
           and AX, 17h    ; Get owner and piece type
-          ;lea BX, pieces ; ASCII data
-          xlat           ; Get piece's ASCII character
-          ;xor BX, BX     ; Page 0
-          mov AH, 0Eh    ; BIOS video function E, write single char and move cursor
-          int 10h        ; BIOS video
+          XLATPUTC       ; Get character and write
           ; Next pair
           lodsw          ; Get 2 pieces from board
           ; Print seventh piece
           push AX        ; Backup pieces
-          ;lea BX, pieces ; ASCII data
           and AL, 17h    ; Get owner and piece type
-          xlat           ; Get piece's ASCII character
-          ;xor BX, BX     ; Page 0
-          mov AH, 0Eh    ; BIOS video function E, write single char and move cursor
-          int 10h        ; BIOS video
+          XLATPUTC       ; Get character and write
           pop AX         ; Restore pieces
           xchg AL, AH    ; Swap first with second piece
           ; Print eighth piece
           and AX, 17h    ; Get owner and piece type
-          ;lea BX, pieces ; ASCII data
-          xlat           ; Get piece's ASCII character
-          ;xor BX, BX     ; Page 0
-          mov AH, 0Eh    ; BIOS video function E, write single char and move cursor
-          int 10h        ; BIOS video
+          XLATPUTC       ; Get character and write
           ; Back to loop
-          ;xor BX, BX     ; Page 0
-          mov AX, 0E0Dh  ; BIOS E, write char - Carriage Return
-          int 10h        ; BIOS video
-          ;xor BX, BX     ; Page 0
-          mov AX, 0E0Ah  ; BIOS E, write char - Line Feed
-          int 10h        ; BIOS video
-          ;pop CX         ; Restore count
+          LPUTC 0Dh      ; Write Carriage Return
+          LPUTC 0Ah      ; Write Line Feed
           ;dec CX         ; --count
           ;jnz drawLoop   ; Next row if unfinished
-          ; TODO: test this below line on real hardware. The jump is too large right now, but if we got rid of some safety push/pops...
           loop drawLoop  ; Next row if unfinished (decrements CX)
 
           ;
           ; Display currently staged move
           ;
 drawEnd:
-          mov AL, 0Dh       ; 0x0D = '\r'
-          int 10h           ; Write character
-          mov AL, 0Ah       ; 0x0A = '\n'
-          int 10h
-          mov AL, coords[0] ; Source Column
-          int 10h
-          mov AL, coords[1] ; Source Row
-          int 10h
-          mov AL, 20h       ; 0x20 = ' '
-          int 10h
-          mov AL, 74h       ; 0x74 = 't'
-          int 10h
-          mov AL, 6Fh       ; 0x6F = 'o'
-          int 10h
-          mov AL, 20h       ; 0x20 = ' '
-          int 10h
-          mov AL, coords[2] ; Destination Column
-          int 10h
-          mov AL, coords[3] ; Destination Row
-          int 10h
-          mov AL, 0Dh       ; 0x0D = '\r'
-          int 10h
-          mov AL, 0Ah       ; 0x0A = '\n'
-          int 10h
+          ; TODO: switch to MS-DOS calls, and stage characters in temp buffer so we can print a single string
+          LPUTC 0Dh      ; Write Carriage Return
+          LPUTC 0Ah      ; Write Line Feed
+          LPUTC coords[0] ; Write source column
+          LPUTC coords[1] ; Write source row
+          LPUTC 20h      ; Write ' '
+          LPUTC 74h      ; Write 't'
+          LPUTC 6Fh      ; Write 'o'
+          LPUTC 20h      ; Write ' '
+          LPUTC coords[2] ; Write destination column
+          LPUTC coords[3] ; Write destination row
+          LPUTC 0Dh      ; Write Carriage Return
+          LPUTC 0Ah      ; Write Line Feed
 
           ;
           ; Display a message based on last status, and reset status

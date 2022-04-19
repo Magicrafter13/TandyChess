@@ -99,7 +99,7 @@ prompts word \
 ; 3 - got second letter
 ; 4 - got second number (destination tile selected)
 ;
-move byte 0 ; Index for table above
+move byte 0, 0 ; Index for table above (extra byte for saving cycles - no need to clear upper byte of register)
 
 ;
 ; Jump table for valid move check, based on 3-bit piece data
@@ -123,6 +123,8 @@ pawnStart byte 32h, 37h ; (ASCII) coordinates for pawn starting row for each
                         ; player (don't change this)
 pawnNormalMove byte 1, -1 ; DST-SRC difference per player
 pawnDoubleMove byte 2, -2 ; DST-SRC difference per player, double move
+
+; 197 bytes of RAM up to this point - try to keep all printable text below 256 to optimize int 10h (AH=0Eh)
 
 Data     ENDS
 
@@ -169,17 +171,16 @@ game:
      ; User input
      ;
 prompt:
-     call drawBoard     ; Draw the chess board
+     call drawBoard        ; Draw the chess board
      ; prompt player for move
-     xor AH, AH         ; Keyboard function 0, get keystroke
-     int 16h            ; Keyboard
-     cmp AL, 71h        ; 71h = 'q'
-     je gameOver        ; Quit
+     xor AH, AH            ; Keyboard function 0, get keystroke
+     int 16h               ; Keyboard
+     cmp AL, 71h           ; 71h = 'q'
+     je gameOver           ; Quit
      ; Read a move
-     mov BL, move       ; Get current move step (how far player is in making their move)
-     xor BH, BH         ; Clear BX
-     shl BX, 1          ; Multiply by 2 since addresses are words not bytes
-     jmp prompts[BX]    ; Jump based on current step
+     mov BX, WORD PTR move ; Get current move step (how far player is in making their move)
+     shl BX, 1             ; Multiply by 2 since addresses are words not bytes
+     jmp prompts[BX]       ; Jump based on current step
 
 promptLetter:
      ; Read in a letter
@@ -224,7 +225,6 @@ moveExecute:
      CRD2OFST B, coords[0] ; Get source coordinates and convert to board offset
      mov DL, board[BX]              ; Get two pieces from coordinates
      mov board[BX], 0               ; Remove selected piece from board
-     push DX                        ; Backup piece being moved
      ; Get the destination and replace whatever is there with the piece
      CRD2OFST B, coords[2] ; Get destination coordinates and convert to board offset
      mov board[BX], DL              ; Place piece in new location
@@ -278,10 +278,7 @@ drawBoard PROC
           mov CX, 8     ; Count = 8
 drawAH:
           inc AL        ; AL++
-          mov AH, 0Eh   ; BIOS video function E, write single char and move cursor
-          push CX       ; Backup count
-          int 10h       ; BIOS video
-          pop CX        ; Restore count
+          int 10h       ; BIOS video (print a-h)
           loop drawAH   ; while (--count)
           mov AX, 0E0Dh ; BIOS video function E, write single char and move cursor, AL = Carriage Return
           ;xor BX, BX    ; Page 0
@@ -289,7 +286,7 @@ drawAH:
           mov AX, 0E0Ah ; BIOS video function E, write single char and move cursor, AL = Line Feed
           ;xor BX, BX    ; Page 0
           int 10h       ; BIOS video
-          mov AX, 0E0Ah ; BIOS video function E, write single char and move cursor, AL = Line Feed
+          ;mov AX, 0E0Ah ; BIOS video function E, write single char and move cursor, AL = Line Feed
           ;xor BX, BX    ; Page 0
           int 10h       ; BIOS video
 
@@ -298,8 +295,9 @@ drawAH:
           ;
           mov CX, 8     ; Count = 8 (rows to print)
           lea SI, board ; SI = address of board data
+          lea BX, pieces ; ASCII data
 drawLoop:
-          push CX       ; Backup count
+          ;push CX       ; Backup count
           ; Row coordinate character
           mov AX, 0E30h ; BIOS video function E, write single character and move cursor, print character 38h ('8')
           add AL, CL    ; (char)AL += count
@@ -316,76 +314,76 @@ drawRow:
           lodsw          ; Get 2 pieces from board
           ; Print first piece
           push AX        ; Backup pieces
-          lea BX, pieces ; ASCII data
+          ;lea BX, pieces ; ASCII data
           and AL, 17h    ; Get owner and piece type
           xlat           ; Get piece's ASCII character
-          xor BX, BX     ; Page 0
+          ;xor BX, BX     ; Page 0
           mov AH, 0Eh    ; BIOS video function E, write single char and move cursor
           int 10h        ; BIOS video
           pop AX         ; Restore pieces
           xchg AL, AH    ; Swap first with second piece
           ; Print second piece
           and AX, 17h    ; Get owner and piece type
-          lea BX, pieces ; ASCII data
+          ;lea BX, pieces ; ASCII data
           xlat           ; Get piece's ASCII character
-          xor BX, BX     ; Page 0
+          ;xor BX, BX     ; Page 0
           mov AH, 0Eh    ; BIOS video function E, write single char and move cursor
           int 10h        ; BIOS video
           ; Next pair
           lodsw          ; Get 2 pieces from board
           ; Print third piece
           push AX        ; Backup pieces
-          lea BX, pieces ; ASCII data
+          ;lea BX, pieces ; ASCII data
           and AL, 17h    ; Get owner and piece type
           xlat           ; Get piece's ASCII character
-          xor BX, BX     ; Page 0
+          ;xor BX, BX     ; Page 0
           mov AH, 0Eh    ; BIOS video function E, write single char and move cursor
           int 10h        ; BIOS video
           pop AX         ; Restore pieces
           xchg AL, AH    ; Swap first with second piece
           ; Print fourth piece
           and AX, 17h    ; Get owner and piece type
-          lea BX, pieces ; ASCII data
+          ;lea BX, pieces ; ASCII data
           xlat           ; Get piece's ASCII character
-          xor BX, BX     ; Page 0
+          ;xor BX, BX     ; Page 0
           mov AH, 0Eh    ; BIOS video function E, write single char and move cursor
           int 10h        ; BIOS video
           ; Next pair
           lodsw          ; Get 2 pieces from board
           ; Print fifth piece
           push AX        ; Backup pieces
-          lea BX, pieces ; ASCII data
+          ;lea BX, pieces ; ASCII data
           and AL, 17h    ; Get owner and piece type
           xlat           ; Get piece's ASCII character
-          xor BX, BX     ; Page 0
+          ;xor BX, BX     ; Page 0
           mov AH, 0Eh    ; BIOS video function E, write single char and move cursor
           int 10h        ; BIOS video
           pop AX         ; Restore pieces
           xchg AL, AH    ; Swap first with second piece
           ; Print sixth piece
           and AX, 17h    ; Get owner and piece type
-          lea BX, pieces ; ASCII data
+          ;lea BX, pieces ; ASCII data
           xlat           ; Get piece's ASCII character
-          xor BX, BX     ; Page 0
+          ;xor BX, BX     ; Page 0
           mov AH, 0Eh    ; BIOS video function E, write single char and move cursor
           int 10h        ; BIOS video
           ; Next pair
           lodsw          ; Get 2 pieces from board
           ; Print seventh piece
           push AX        ; Backup pieces
-          lea BX, pieces ; ASCII data
+          ;lea BX, pieces ; ASCII data
           and AL, 17h    ; Get owner and piece type
           xlat           ; Get piece's ASCII character
-          xor BX, BX     ; Page 0
+          ;xor BX, BX     ; Page 0
           mov AH, 0Eh    ; BIOS video function E, write single char and move cursor
           int 10h        ; BIOS video
           pop AX         ; Restore pieces
           xchg AL, AH    ; Swap first with second piece
           ; Print eighth piece
           and AX, 17h    ; Get owner and piece type
-          lea BX, pieces ; ASCII data
+          ;lea BX, pieces ; ASCII data
           xlat           ; Get piece's ASCII character
-          xor BX, BX     ; Page 0
+          ;xor BX, BX     ; Page 0
           mov AH, 0Eh    ; BIOS video function E, write single char and move cursor
           int 10h        ; BIOS video
           ; Back to loop
@@ -395,44 +393,39 @@ drawRow:
           ;xor BX, BX     ; Page 0
           mov AX, 0E0Ah  ; BIOS E, write char - Line Feed
           int 10h        ; BIOS video
-          pop CX         ; Restore count
-          dec CX         ; --count
-          jnz drawLoop   ; Next row if unfinished
+          ;pop CX         ; Restore count
+          ;dec CX         ; --count
+          ;jnz drawLoop   ; Next row if unfinished
           ; TODO: test this below line on real hardware. The jump is too large right now, but if we got rid of some safety push/pops...
-          ;loop drawLoop  ; Next row if unfinished (decrements CX)
+          loop drawLoop  ; Next row if unfinished (decrements CX)
 
           ;
           ; Display currently staged move
           ;
 drawEnd:
-          xor BX, BX        ; Page 0
-          mov AX, 0E0Dh     ; BIOS video 0E, write char - 0x0D = '\r'
-          int 10h           ; BIOS video
-          mov AX, 0E0Ah     ; 0x0A = '\n'
+          mov AL, 0Dh       ; 0x0D = '\r'
+          int 10h           ; Write character
+          mov AL, 0Ah       ; 0x0A = '\n'
           int 10h
-          mov AH, 0Eh
           mov AL, coords[0] ; Source Column
           int 10h
-          mov AH, 0Eh
           mov AL, coords[1] ; Source Row
           int 10h
-          mov AX, 0E20h     ; 0x20 = ' '
+          mov AL, 20h       ; 0x20 = ' '
           int 10h
-          mov AX, 0E74h     ; 0x74 = 't'
+          mov AL, 74h       ; 0x74 = 't'
           int 10h
-          mov AX, 0E6Fh     ; 0x6F = 'o'
+          mov AL, 6Fh       ; 0x6F = 'o'
           int 10h
-          mov AX, 0E20h     ; 0x20 = ' '
+          mov AL, 20h       ; 0x20 = ' '
           int 10h
-          mov AH, 0Eh
           mov AL, coords[2] ; Destination Column
           int 10h
-          mov AH, 0Eh
           mov AL, coords[3] ; Destination Row
           int 10h
-          mov AX, 0E0Dh     ; 0x0D = '\r'
+          mov AL, 0Dh       ; 0x0D = '\r'
           int 10h
-          mov AX, 0E0Ah     ; 0x0A = '\n'
+          mov AL, 0Ah       ; 0x0A = '\n'
           int 10h
 
           ;
@@ -441,13 +434,10 @@ drawEnd:
           mov BX, [status]          ; Get current status
           mov BX, message_table[BX] ; Get address of relevant message
           mov AL, [BX]              ; Get next character to print
-drawString:
           mov AH, 0Eh               ; BIOS video function E, write character
-          push BX                   ; Backup address
-          xor BX, BX                ; Page 0
+drawString:
           int 10h                   ; BIOS video
-          pop BX                    ; Restore address
-          inc BX                    ; Next character
+          inc BX                    ; Next character (index)
           mov AL, [BX]              ; Get next character to print
           test AL, 0FFh             ; Apparently mov doesn't set/clear the Zero Flag...
           jnz drawString            ; Loop until null terminator

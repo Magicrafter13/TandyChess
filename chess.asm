@@ -1,4 +1,5 @@
 .8086
+.SEQ
 
 ;
 ; Takes a word register (and references to its upper and lower byte), and the
@@ -26,12 +27,12 @@ CLRCOORD MACRO
          mov WORD PTR coords[2], 2020h ; Clear destination coordinate
          ENDM
 
-Stack    SEGMENT STACK
-theStack byte 8 DUP ("(C) Matthew R.  ") ; 8 * 16 bytes
-Stack    ENDS
+.MODEL small, farstack ; Can't combine stack and data segment as I rely on
+                       ; somewhat knowing the size of DS for optimizations
 
-Data     SEGMENT PUBLIC
+.STACK 128 ; byte 8 DUP ("(C) Matthew R.  ") ; 8 * 16 bytes
 
+.DATA
 ;
 ; Game board data
 ;
@@ -136,7 +137,9 @@ numbers byte 38h, 37h, 36h, 35h, 34h, 33h, 32h, 31h
 ; ASCII " to "
 spacer word 7420h, 206Fh
 
-; 205 bytes of RAM up to this point - try to keep all printable text below 256 to optimize int 10h (AH=0Eh)
+; 205 bytes of RAM up to this point - try to keep all printable text below 241
+; to optimize BX only needing BL? (256 but up to 15 bytes padding between DATA
+; and board...)
 
 ; Original video mode (when program began)
 video_mode byte 0, 0 ; extra byte for word padding (and BIOS video function 0)
@@ -144,15 +147,10 @@ video_mode byte 0, 0 ; extra byte for word padding (and BIOS video function 0)
 ; Buffer to stage text to be printed
 print_buffer byte 256 dup ('$') ; 256 bytes, using MS-DOS string terminator ($)
 
-Data     ENDS
-
-Code SEGMENT PUBLIC
-
-  assume CS:Code,DS:Data
-
+.CODE
 main PROC
-start:
-     mov AX, Data
+start::
+     lea AX, DGROUP     ; Could use @data but uasm doesn't like it
      mov DS, AX
      mov ES, AX
      cld                ; Clear Direction
@@ -207,7 +205,7 @@ prompt:
      shl BX, 1             ; Multiply by 2 since addresses are words not bytes
      jmp prompts[BX]       ; Jump based on current step
 
-promptLetter:
+promptLetter::
      ; Read in a letter
      sub AL, 61h        ; 61h = 'a'
      jb prompt          ; Try again
@@ -220,7 +218,7 @@ promptLetter:
      mov move, BL       ; Update in memory
      jmp prompt
 
-promptNumber:
+promptNumber::
      ; Read in a number
      sub AL, 31h        ; 31h = '1'
      jb prompt          ; Try again
@@ -234,7 +232,7 @@ promptNumber:
      mov coords[BX], AL ; Store in coordinate variable
      jmp prompt
 
-promptCheck:
+promptCheck::
      ; Confirm move
      mov move, 0        ; Set move step thingy to 0
      call valid         ; Check if move is valid (and if player is in check, make sure move gets them out of check)
@@ -452,7 +450,7 @@ validPieceJump:
       ; should NEVER happen!
       ; Or a space contained 111 (undefined piece) - which also shouldn't happen
       ;
-validEmpty:
+validEmpty::
       xor DX, DX ; Set Zero Flag
       ret
 
@@ -464,7 +462,7 @@ validEmpty:
       ; - Move forward two spaces if in starting row
       ; - Attack diagonally
       ;
-validPawn:
+validPawn::
       mov AX, word ptr coords[2] ; Get destination coordinates
       mov BX, word ptr player    ; Get current player as offset
 
@@ -527,7 +525,7 @@ validPawnDouble:
       ;
       ; Check if play is valid for rook
       ;
-validRook:
+validRook::
       xor DX, DX      ; Set Zero Flag
       jmp validReturn ; Finish
 
@@ -537,7 +535,7 @@ validRook:
       ; Currently implemented:
       ; - Move in valid L shape
       ;
-validKnight:
+validKnight::
       mov AX, word ptr coords[2] ; Get destination coordinates
 
       ; Verify valid X coordinate (-2, -1, 1, or 2)
@@ -565,14 +563,14 @@ validKnightPositiveY:
       ;
       ; Check if play is valid for bishop
       ;
-validBishop:
+validBishop::
       xor DX, DX      ; Set Zero Flag
       jmp validReturn ; Finish
 
       ;
       ; Check if play is valid for queen
       ;
-validQueen:
+validQueen::
       xor DX, DX      ; Set Zero Flag
       jmp validReturn ; Finish
 
@@ -582,7 +580,7 @@ validQueen:
       ; Currently implemented:
       ; - Move any direction one space
       ;
-validKing: ; TODO: check if move would place king in check...
+validKing:: ; TODO: check if move would place king in check...
       mov AX, word ptr coords[2] ; Get destination coordinates
 
       ; Check if moving within same column and row
@@ -621,7 +619,5 @@ validReturnPop:
       popf               ; Restore flags
       ret
 valid ENDP
-
-Code ENDS
 
   END start
